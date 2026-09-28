@@ -4,50 +4,104 @@
   python mix.py events.json -o mix.wav
   python mix.py events.json -o mix.wav --recipes my_recipes.py --music score.wav --bed rumble --stems stems/
 
-events.json (see assets/events.example.json):
-  {"dur": 14.0,
-   "events": [
-     {"t": 4.60, "type": "gunshot", "args": {"kind": "pistol"}, "gain": 0.7, "pan": 0.3},
-     {"t": 2.00, "type": "file", "file": "voices/line01.wav", "bus": "vo"}
-   ]}
-
-  t      seconds from the start of the video
-  type   a recipe name, or "file" to drop in an audio file (voice lines, recorded samples)
-  args   keyword arguments for the recipe            (optional)
-  gain   linear gain; default from --gains, else 0.5  (optional)
-  pan    -1 left .. 1 right                           (optional)
-  bus    sfx | vo | music | bed; default sfx, "file" events default vo (optional)
-  seed   fixes this event's randomness                (optional; default derived from type + t)
-
+events.json: {"dur": 14.0, "events": [{"t": 4.6, "type": "gunshot", "args": {"kind": "pistol"}, "gain": 0.7, "pan": 0.3}, ...]}
+Field reference: references/event-sync.md section 1. Example: assets/events.example.json.
 Anything on the vo bus ducks the music bus. File paths are relative to the events file.
+Exit status: 0 = mix written; 1 = input problem, explained on stderr as "error: ... / fix: ...".
 """
 import argparse, json, os, sys, zlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from sfxkit import SR, np, reseed, add, limit, read_wav, write_wav, db, n_
+from sfxkit import SR, np, reseed, add, limit, read_wav, write_wav, db, n_, fail
 import recipes
 
 BUSES = ('sfx', 'vo', 'music', 'bed')
 BUS_GAIN = {'sfx': .9, 'vo': 1.25, 'music': 1.0, 'bed': 1.0}
 
 
-def masking_report(placed, mix_mono, min_smr, span=.3, frame=.03):
-    """Signal-to-masker ratio per event: its own energy vs everything else in the mix, per band, in 30 ms frames
-    over its first 0.3 s. The best (frame, band) counts: the ear catches a sound where it is most exposed."""
+def load_json(path, what):
+    if not os.path.isfile(path): fail(f'{what} not found: {path}', 'check the path')
+    try:
+        with open(path) as f: return json.load(f)
+    except json.JSONDecodeError as ex:
+        fail(f'{what} {path} is not valid JSON: {ex.msg} at line {ex.lineno}, column {ex.colno}',
+             'fix that spot (common causes: trailing comma, single quotes, comments)')
+
+
+def validate(E, table, path):
+    """Check the whole event list up front and report every problem at once."""
+    if not isinstance(E, dict): fail(f'{path}: top level must be an object like {{"dur": 10, "events": [...]}}')
+    events = E.get('events', E.get('ev'))
+    if not isinstance(events, list): fail(f'{path}: missing "events" list', 'add "events": [ {"t": 1.0, "type": "click"} ]')
+    dur = E.get('dur')
+    if dur is not None and (not isinstance(dur, (int, float)) or dur <= 0):
+        fail(f'{path}: "dur" must be a positive number of seconds, got {dur!r}')
+    problems, unknown = [], {}
+    for i, e in enumerate(events):
+        at = f'events[{i}]'
+        if not isinstance(e, dict): problems.append(f'{at} is not an object'); continue
+        at += f' ({e.get("type", "?")} at {e.get("t", "?")}s)'
+        if not isinstance(e.get('t'), (int, float)): problems.append(f'{at}: "t" (seconds) is missing or not a number')
+        ty = e.get('type')
+        if not isinstance(ty, str): problems.append(f'{at}: "type" is missing (a recipe name or "file")'); continue
+        if ty == 'file':
+            if not isinstance(e.get('file'), str): problems.append(f'{at}: file event needs "file": "path/to/audio.wav"')
+            elif not os.path.isfile(os.path.join(os.path.dirname(os.path.abspath(path)), e['file'])):
+                problems.append(f'{at}: file not found: {os.path.join(os.path.dirname(os.path.abspath(path)), e["file"])} '
+                                '(paths are relative to the events file)')
+        elif ty not in table: unknown.setdefault(ty, []).append(i)
+        for k, lo, hi in (('gain', 0, 100), ('pan', -1, 1)):
+            if k in e and (not isinstance(e[k], (int, float)) or not lo <= e[k] <= hi):
+                problems.append(f'{at}: "{k}" must be a number in [{lo}, {hi}], got {e[k]!r}')
+        if e.get('bus', 'sfx') not in BUSES: problems.append(f'{at}: "bus" must be one of {list(BUSES)}, got {e.get("bus")!r}')
+        if 'seed' in e and not isinstance(e['seed'], int): problems.append(f'{at}: "seed" must be an integer')
+        if 'args' in e and not isinstance(e['args'], dict): problems.append(f'{at}: "args" must be an object')
+    import difflib
+    for ty, idx in unknown.items():
+        near = difflib.get_close_matches(ty, table, 3)
+        problems.append(f'no recipe named {ty!r} (events {idx})' + (f'; did you mean {" / ".join(near)}?' if near else ''))
+    if problems:
+        fail(f'{path}: {len(problems)} problem(s)\n  - ' + '\n  - '.join(problems),
+             'fix the events file; list recipes with render_sfx.py --list [--recipes FILE]')
+    if dur is None:
+        if not events: fail(f'{path}: no events and no "dur"', 'add "dur": <video length in seconds>')
+        dur = max(e['t'] for e in events) + 3
+        print(f'note: no "dur" in {path}; using last event + 3 s = {dur:.2f}s (set it to the video length)')
+    return events, float(dur)
+
+
+def masking_report(placed, mix, min_smr, span=.3, frame=.03):
+    """Signal-to-masker ratio per event: its own energy vs everything else in the mix, per channel and band, in
+    30 ms frames over its first 0.3 s. The best (channel, frame, band) counts: the ear catches a sound where it is
+    most exposed. Returns (flagged, unassessed)."""
     bands = [('low', 20, 250), ('mid', 250, 4000), ('high', 4000, 20000)]
-    F = n_(frame); w = np.hanning(F); fq = np.fft.rfftfreq(F, 1 / SR)
+    F = n_(frame); fq = np.fft.rfftfreq(F, 1 / SR)
     masks = [(name, (fq >= lo) & (fq < hi)) for name, lo, hi in bands]
-    flagged = []
-    for label, t, x in placed:
-        s = n_(t); k = min(len(x), n_(span), len(mix_mono) - s)
-        if k < F: continue
+    flagged, unassessed = [], []
+    for label, t, own2 in placed:                  # own2: (len, 2) contribution as mixed
+        s = n_(t); k = min(len(own2), n_(span), len(mix) - s)
+        if k <= 0: unassessed.append((label, t)); continue
         best = (-999.0, '')
-        for i in range(0, k - F + 1, F // 2):
-            own = x[i:i + F]; rest = mix_mono[s + i:s + i + F] - own
-            O = np.abs(np.fft.rfft(own * w)) ** 2; R = np.abs(np.fft.rfft(rest * w)) ** 2
-            for name, m in masks:
-                best = max(best, (10 * np.log10((O[m].sum() + 1e-20) / (R[m].sum() + 1e-20)), name))
+        for i in range(0, max(1, k - F + 1), F // 2):
+            j = min(i + F, k); w = np.hanning(j - i)
+            for c in (0, 1):
+                own = own2[i:j, c]; rest = mix[s + i:s + j, c] - own
+                O = np.abs(np.fft.rfft(own * w, F)) ** 2; R = np.abs(np.fft.rfft(rest * w, F)) ** 2
+                for name, m in masks:
+                    best = max(best, (10 * np.log10((O[m].sum() + 1e-20) / (R[m].sum() + 1e-20)), name))
         if best[0] < min_smr: flagged.append((label, t, best[0], best[1]))
-    return flagged
+    return flagged, unassessed
+
+
+def place(buf, x, t, gain=1.0, pan=0.0):
+    """Add mono (N,) or stereo (N, 2) x at t seconds; a negative t trims the head. Returns (start, contribution)."""
+    if t < 0: x = x[n_(-t):]; t = 0.0
+    s = n_(t); k = max(0, min(len(x), len(buf) - s))
+    l, r = np.cos((pan + 1) * np.pi / 4) * 1.414, np.sin((pan + 1) * np.pi / 4) * 1.414
+    x2 = (np.stack([x, x], 1) if x.ndim == 1 else x.copy())[:k] * gain
+    x2[:, 0] *= l; x2[:, 1] *= r
+    if x.ndim == 1: add(buf, x[:k], t, gain, pan)   # add() also fades the last 5 ms
+    else: buf[s:s + k] += x2                        # stereo files: pan acts as balance
+    return s, x2
 
 
 def main():
@@ -55,82 +109,83 @@ def main():
     ap.add_argument('events'); ap.add_argument('-o', '--out', default='mix.wav')
     ap.add_argument('--recipes', action='append', default=[], metavar='FILE', help='extra recipe file(s)')
     ap.add_argument('--gains', metavar='JSON', help='{"gunshot": 0.7, ...} default gain per type')
-    ap.add_argument('--music', metavar='FILE', help='music track, placed at t=0')
+    ap.add_argument('--music', metavar='FILE', help='music track, placed at t=0 (relative to the events file)')
     ap.add_argument('--music-gain', type=float, default=1.0)
     ap.add_argument('--bed', metavar='RECIPE', help='recipe rendered for the whole duration as a background bed')
     ap.add_argument('--bed-gain', type=float, default=.03)
     ap.add_argument('--duck-db', type=float, default=8.0, help='how far music dips under voice (dB)')
-    ap.add_argument('--ceiling', type=float, default=.95)
+    ap.add_argument('--ceiling', type=float, default=.95, help='limiter ceiling, 0 < c <= 1')
     ap.add_argument('--stems', metavar='DIR', help='also write each bus as its own wav')
     ap.add_argument('--min-smr', type=float, default=0.0,
                     help='flag events whose best band is less than this many dB above everything else playing')
     a = ap.parse_args()
+    if not 0 < a.ceiling <= 1: fail(f'--ceiling must be in (0, 1], got {a.ceiling}')
 
     base = os.path.dirname(os.path.abspath(a.events))
-    E = json.load(open(a.events))
-    events = E.get('events', E.get('ev', []))
-    dur = float(E.get('dur') or max(e['t'] for e in events) + 3)
-    N = n_(dur)
     table = recipes.load(a.recipes)
-    gains = json.load(open(a.gains)) if a.gains else {}
+    events, dur = validate(load_json(a.events, 'events file'), table, a.events)
+    gains = load_json(a.gains, 'gains file') if a.gains else {}
+    if not isinstance(gains, dict) or not all(isinstance(v, (int, float)) for v in gains.values()):
+        fail(f'gains file {a.gains} must map type -> number', 'e.g. {"gunshot": 0.7, "step": 0.3}')
+    N = n_(dur)
     bus = {k: np.zeros((N, 2)) for k in BUSES}
     vo_on = np.zeros(N)
-    missing = set()
-    placed = []                                    # (label, t, mono contribution) for the masking report
+    placed, seen = [], {}                          # placed: (label, t, stereo contribution) for the masking report
 
-    for e in events:
-        ty = e['type']; b = e.get('bus', 'vo' if ty == 'file' else 'sfx')
+    for i, e in enumerate(events):
+        ty, t = e['type'], float(e['t'])
+        b = e.get('bus', 'vo' if ty == 'file' else 'sfx')
         g = e.get('gain', gains.get(ty, .5)); pan = e.get('pan', 0.0)
-        if e['t'] >= dur: print(f'warning: event {ty} at {e["t"]}s is after dur={dur}s'); continue
+        if t >= dur: print(f'warning: events[{i}] {ty} at {t}s starts after dur={dur}s; skipped'); continue
         if ty == 'file':
-            y = read_wav(os.path.join(base, e['file']))
-            s = n_(e['t']); k = min(len(y), N - s)
-            bus[b][s:s + k] += y[:k] * g
-            if b == 'vo': vo_on[s:s + k] = 1
-            placed.append((e['file'], e['t'], y[:k].mean(1) * g * BUS_GAIN[b]))
-            continue
-        if ty not in table: missing.add(ty); continue
-        reseed(e.get('seed', zlib.crc32(f'{ty}@{e["t"]:.4f}'.encode())))
-        x = table[ty](**e.get('args', {}))
-        add(bus[b], x, e['t'], g, pan)
-        if b == 'vo': vo_on[n_(e['t']):n_(e['t']) + len(x)] = 1
-        placed.append((ty, e['t'], x * g * BUS_GAIN[b]))
-    if missing: print('warning: no recipe for', ', '.join(sorted(missing)), '(add one with --recipes)')
+            x = read_wav(os.path.join(base, e['file'])); label = os.path.basename(e['file'])
+        else:
+            key = f'{ty}@{t:.4f}:{json.dumps(e.get("args", {}), sort_keys=True)}'
+            seen[key] = seen.get(key, 0) + 1       # identical stacked events still get different takes
+            reseed(e.get('seed', zlib.crc32(f'{key}#{seen[key]}'.encode())))
+            x = recipes.call(table, ty, e.get('args', {}), f'events[{i}] at {t}s'); label = ty
+        if t < 0 and len(x) <= n_(-t):
+            print(f'warning: events[{i}] {ty} at {t}s ends before 0; skipped'); continue
+        s, contrib = place(bus[b], x, t, g, pan)
+        if b == 'vo': vo_on[s:s + len(contrib)] = 1
+        placed.append((label, max(t, 0.0), contrib * BUS_GAIN[b]))
 
     if a.music:
-        m = read_wav(os.path.join(base, a.music) if not os.path.isabs(a.music) else a.music)
+        m = read_wav(a.music if os.path.isabs(a.music) else os.path.join(base, a.music))
         k = min(len(m), N); bus['music'][:k] += m[:k] * a.music_gain
     if a.bed:
-        reseed(1); fn = table[a.bed]
-        try: x = fn(d=dur)
-        except TypeError: x = np.resize(fn(), N)
-        add(bus['bed'], x[:N], 0, a.bed_gain)
+        import inspect
+        reseed(1); has_d = a.bed in table and 'd' in inspect.signature(table[a.bed]).parameters
+        x = recipes.call(table, a.bed, {'d': dur} if has_d else {}, '--bed')
+        add(bus['bed'], np.resize(x, N), 0, a.bed_gain)
 
     # duck music under voice: smooth the on/off mask over 0.25 s so the dip breathes in and out
     if vo_on.any():
-        k = n_(.25); depth = 1 - 10 ** (-a.duck_db / 20)
-        duck = 1 - depth * np.clip(np.convolve(vo_on, np.ones(k) / k, 'same') * 1.5, 0, 1)
+        k = min(n_(.25), N); depth = 1 - 10 ** (-a.duck_db / 20)
+        duck = 1 - depth * np.clip(np.convolve(vo_on, np.ones(k) / k, 'same')[:N] * 1.5, 0, 1)
         bus['music'] *= duck[:, None]
 
     mix = sum(bus[k] * BUS_GAIN[k] for k in BUSES)
-    masked = masking_report(placed, mix.mean(1), a.min_smr)
-    if not np.isfinite(mix).all(): sys.exit('error: mix contains NaN/inf; check your recipes')
+    if not np.isfinite(mix).all(): fail('mix contains NaN/inf', 'render each recipe alone with render_sfx.py to find the bad one')
+    masked, unassessed = masking_report(placed, mix, a.min_smr)
     raw_peak = np.abs(mix).max()
     mix = limit(mix, a.ceiling)
     write_wav(a.out, mix)
     if a.stems:
-        os.makedirs(a.stems, exist_ok=True)
         for k in BUSES:
             if bus[k].any(): write_wav(os.path.join(a.stems, f'{k}.wav'), bus[k] * BUS_GAIN[k])
 
-    print(f'{a.out}  {dur:.2f}s  {len(events)} events')
+    print(f'{a.out}  {dur:.2f}s  {len(placed)} of {len(events)} events placed')
     for k in BUSES:
         if bus[k].any():
             act = np.abs(bus[k]).max(1) > 1e-4
             print(f'  {k:6s} rms(active) {db(bus[k][act] * BUS_GAIN[k]):6.1f} dB   peak {np.abs(bus[k] * BUS_GAIN[k]).max():.2f}')
-    print(f'  masking: {len(placed) - len(masked)}/{len(placed)} events clear the rest of the mix in at least one band')
+    ok = len(placed) - len(masked) - len(unassessed)
+    print(f'  masking: {ok}/{len(placed)} events clear the rest of the mix in at least one band')
     for label, t, smr, band in masked:
         print(f'    CHECK {t:7.2f}s {label:14s} best band {band:4s} {smr:+5.1f} dB  -> raise gain, pan apart, or move it off louder sounds')
+    for label, t in unassessed:
+        print(f'    CHECK {t:7.2f}s {label:14s} not assessed (starts at the very end)')
     print(f'  pre-limit peak {raw_peak:.2f} -> {np.abs(mix).max():.2f}'
           + ('   (limiter working hard: lower gains)' if raw_peak > 2 * a.ceiling else ''))
 

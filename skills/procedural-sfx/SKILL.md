@@ -1,11 +1,11 @@
 ---
 name: procedural-sfx
-description: Synthesize sound effects from code (numpy/scipy, no sample libraries) and mix them frame-accurately under a video or animation. Covers gunshots, explosions, impacts, footsteps, whooshes, UI clicks and dings, sci-fi zaps, rumbles and ambience beds, plus event-driven mixing with voice ducking, masking checks and loudness-normalised muxing. Use this skill whenever someone wants sound effects, foley or a soundtrack for a code-rendered video, animation, explainer, motion graphic, data-viz video or game prototype; asks how to make a specific sound (枪声, 爆炸, 脚步, 音效, 拟音, "a laser sound", "a door slam"); needs royalty-free SFX with no licensing questions; or needs audio synced to events in an animation, even if they never say "procedural" or "synthesis".
+description: Synthesize sound effects from code (numpy/scipy, no sample libraries), check them by numbers, and mix them frame-accurately under a video or animation with voice ducking, masking checks and loudness-normalised muxing. Use whenever someone needs sound effects or foley for a code-rendered video, animation, explainer, motion graphic or game prototype; wants to generate a specific sound from code (枪声, 爆炸, 脚步, 音效, 拟音, a laser, a door slam); needs SFX with no third-party sample licences; or needs audio synced to animation events, even if they never say "procedural". Not for composing music or finding recorded samples.
 ---
 
 # Procedural SFX
 
-Make every sound effect from noise, sine waves, filters and envelopes, then place each one on the exact frame where it happens. You get sounds with no licence attached that render identically on every run and stay in sync with the picture automatically.
+Make every sound effect from noise, sine waves, filters and envelopes, then place each one on the exact frame where it happens. You get sounds with no third-party sample licences that render identically on every run and stay in sync with the picture automatically.
 
 This works best for stylised work: animation, explainers, UI, motion graphics, game prototypes. For photoreal film foley (a specific real gun, real footsteps on real gravel) a recorded sample is still better. The mixer accepts audio files too (`"type": "file"`), so hybrids are fine.
 
@@ -16,7 +16,7 @@ pip install -r scripts/requirements.txt   # numpy, scipy, soundfile
 python scripts/check_env.py               # verifies them; ffmpeg is optional (only for muxing)
 ```
 
-All scripts live in `scripts/` and run from anywhere. Paths below are relative to this skill's directory.
+All scripts live in `scripts/` and run from anywhere. Paths below are relative to this skill's directory. On a mistake they exit 1 with `error: …` and a `fix: …` line; act on the fix line and rerun.
 
 ## Workflow
 
@@ -28,11 +28,11 @@ All scripts live in `scripts/` and run from anywhere. Paths below are relative t
 
 3. **Check each sound by numbers.** You cannot hear the output, so measure it: `python scripts/analyze.py sound.wav --bands`. Compare attack, ring time, spectral centroid and band balance against what the sound should be. `references/design-method.md` has rough targets. Also render several takes with `--variants 4` to confirm repeated sounds vary.
 
-4. **Write the event list.** `events.json` is one entry per sound with time, type, args, gain and pan (`assets/events.example.json`). Take the times from the same constants that drive the animation rather than retyping them. See `references/event-sync.md` for the schema, exporting from different animation stacks, and anticipation offsets such as a whoosh that starts before its impact.
+4. **Write the event list.** `events.json` is one entry per sound with time, type, args, gain and pan. `assets/events.example.json` is a runnable example; voice lines and recorded audio go in as `"type": "file"` events. Take the times from the same constants that drive the animation rather than retyping them. See `references/event-sync.md` for the schema, exporting from different animation stacks, and anticipation offsets such as a whoosh that starts before its impact.
 
-5. **Mix.** Run `python scripts/mix.py events.json -o mix.wav [--recipes my_recipes.py] [--music score.wav] [--bed rumble] [--stems stems/]`. It prints levels per bus and a masking report that flags events buried under louder sounds. Fix every `CHECK` line. See `references/mixing.md` for gain staging, ducking and fixes for masking.
+5. **Mix.** Run `python scripts/mix.py events.json -o mix.wav [--recipes my_recipes.py] [--music score.wav] [--bed rumble] [--stems stems/]`. It validates the whole events file first, then prints levels per bus and a masking report that flags events buried under louder sounds. Fix every `CHECK` line. See `references/mixing.md` for gain staging, ducking and fixes for masking.
 
-6. **Put it under the picture.** Run `sh scripts/mux.sh video.mp4 mix.wav out.mp4 [-14]`. This does two-pass loudness normalisation (−14 LUFS for web/social; other targets are in `references/mixing.md`) and prints the measured result.
+6. **Put it under the picture.** Run `sh scripts/mux.sh video.mp4 mix.wav out.mp4 [LUFS=-14] [dBTP=-1]`. This does two-pass loudness normalisation (−14 LUFS for web/social; other targets are in `references/mixing.md`) and prints the measured result.
 
 7. **Hand off for listening.** Numbers catch broken sounds but not ugly ones. Tell the user which sounds are new or untuned, render them as separate wavs (`render_sfx.py --all dir/` or `--stems`), and ask them to listen. If something is off, `references/troubleshooting.md` maps complaints like "too thin", "clicks at the end" or "sounds robotic" to fixes, and has the final QA checklist.
 
@@ -55,6 +55,6 @@ Impacts: `click`, `clack`, `crash`, `thump`, `step` (hard/wood/soft), `creak` ·
 ## Principles
 
 - **One recipe = one normalised sound; gain lives in the event list.** Recipes end with `norm(x) * v`, and loudness is set only by `gain` in events.json. Mixing is then a matter of editing one table.
-- **Randomness only through `noise()`, `rand()`, `uniform()`.** `mix.py` seeds each event from its type and time, so adding an event never changes how other events sound, and every render is byte-identical.
+- **Randomness only through `noise()`, `rand()`, `uniform()`.** `mix.py` seeds each event from its type, time and args, so adding an event never changes how other events sound, and every render is byte-identical.
 - **Vary repeated sounds.** Identical repeats (footsteps, gunfire, typing) sound fake. Randomise pitch by ±5–10%, level by ±20% and pan slightly.
 - **Timing comes from the animation, not from your ears.** When sync is off, the fix is almost always in how the event times were produced, not a nudge in the mix.

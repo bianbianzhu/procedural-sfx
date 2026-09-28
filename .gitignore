@@ -3,4 +3,3 @@ __pycache__/
 *.wav
 *.mp4
 .DS_Store
-.audit/

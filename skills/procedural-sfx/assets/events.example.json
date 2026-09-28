@@ -2,9 +2,8 @@
   "dur": 14.0,
   "events": [
     {"t": 0.50, "type": "whoosh", "args": {"d": 0.5}, "gain": 0.35, "pan": -0.4},
-    {"t": 2.00, "type": "file", "file": "voices/line01.wav", "bus": "vo"},
     {"t": 4.60, "type": "gunshot", "args": {"kind": "pistol"}, "gain": 0.7, "pan": 0.3},
-    {"t": 4.95, "type": "clack", "args": {"pitch": 1.6}, "gain": 0.25, "pan": 0.5},
+    {"t": 4.95, "type": "clack", "args": {"pitch": 1.6}, "gain": 0.3, "pan": 0.5},
     {"t": 6.00, "type": "burst", "args": {"n": 5, "kind": "rifle"}, "gain": 0.55, "pan": -0.2},
     {"t": 9.00, "type": "step", "args": {"surface": "wood"}, "gain": 0.3},
     {"t": 9.45, "type": "step", "args": {"surface": "wood"}, "gain": 0.3},

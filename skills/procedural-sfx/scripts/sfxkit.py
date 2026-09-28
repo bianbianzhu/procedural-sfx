@@ -12,7 +12,14 @@ _rng = np.random.default_rng(7)
 
 __all__ = ['SR', 'np', 'reseed', 'rand', 'uniform', 't_', 'n_', 'noise', 'brown', 'env_exp', 'env_ad',
            'bp', 'lp', 'hp', 'sweep', 'norm', 'sat', 'echo', 'radio_fx', 'compress', 'limit',
-           'add', 'stereo', 'db', 'read_wav', 'write_wav']
+           'add', 'db', 'read_wav', 'write_wav', 'fail']
+
+
+def fail(msg, fix=None, code=1):
+    """Print an actionable error (what went wrong + how to fix it) and exit non-zero."""
+    import sys
+    print(f'error: {msg}' + (f'\n  fix: {fix}' if fix else ''), file=sys.stderr)
+    sys.exit(code)
 
 
 # ---------- randomness (seeded, so every render is identical) ----------
@@ -50,8 +57,8 @@ def env_ad(d, attack, tau):
 
 
 # ---------- filters (frequencies are clamped below Nyquist, so pitch-shifted recipes never crash) ----------
-def _f(f): return float(np.clip(f, 1, SR / 2 * .98))
-def bp(x, lo, hi, o=2): return sosfilt(butter(o, [_f(lo), _f(max(hi, lo * 1.01))], 'band', fs=SR, output='sos'), x)
+def _f(f, top=.98): return float(np.clip(f, 1, SR / 2 * top))
+def bp(x, lo, hi, o=2): return sosfilt(butter(o, [_f(lo, .96), max(_f(hi), _f(lo, .96) * 1.01)], 'band', fs=SR, output='sos'), x)
 def lp(x, f, o=2):      return sosfilt(butter(o, _f(f), 'low', fs=SR, output='sos'), x)
 def hp(x, f, o=2):      return sosfilt(butter(o, _f(f), 'high', fs=SR, output='sos'), x)
 
@@ -121,21 +128,34 @@ def add(buf, x, at, gain=1.0, pan=0.0):
     buf[s:e, 1] += x[:e - s] * gain * r * 1.414
 
 
-def stereo(x): return np.stack([x, x], 1)
 def db(x):     return 20 * np.log10(np.sqrt(np.mean(np.square(x))) + 1e-12)
 
 
 # ---------- files ----------
 def read_wav(path, mono=False):
-    """Read any wav/flac/ogg, resampled to SR. Returns (N,) if mono else (N, 2)."""
-    import soundfile as sf
-    y, sr = sf.read(path, always_2d=True)
+    """Read any wav/flac/ogg, resampled to SR. Returns (N,) if mono else (N, 2); 3+ channels are downmixed."""
+    import os, soundfile as sf
+    if not os.path.isfile(path):
+        fail(f'audio file not found: {path}', 'check the path (event "file" paths are relative to the events file)')
+    try:
+        y, sr = sf.read(path, always_2d=True)
+    except Exception as ex:
+        fail(f'cannot read audio file {path}: {ex}', 'convert it to wav/flac/ogg, e.g. ffmpeg -i in.mp3 out.wav')
     if sr != SR: y = resample_poly(y, SR, sr, axis=0)
-    if mono: return y.mean(1)
-    return y if y.shape[1] == 2 else np.repeat(y[:, :1], 2, 1)
+    if mono or y.shape[1] != 2:
+        m = y.mean(1)
+        return m if mono else np.stack([m, m], 1)
+    return y
 
 
 def write_wav(path, x, peak=None):
-    import soundfile as sf
+    """Write a 32-bit float wav (peaks above 1.0 survive, nothing clips on disk; no timestamped header chunks, so
+    identical audio gives identical bytes). Creates the folder if needed."""
+    import os
+    from scipy.io import wavfile
     if peak: x = norm(x, peak)
-    sf.write(path, np.asarray(x, dtype=np.float32), SR)
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        wavfile.write(path, SR, np.asarray(x, dtype=np.float32))
+    except OSError as ex:
+        fail(f'cannot write {path}: {ex.strerror}', 'choose a writable output path')

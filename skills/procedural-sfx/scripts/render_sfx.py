@@ -9,16 +9,17 @@
 """
 import argparse, ast, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from sfxkit import SR, np, reseed, write_wav, n_
+from sfxkit import SR, np, reseed, write_wav, n_, fail
 import recipes
 
 
 def parse_kv(items):
     out = {}
     for it in items:
-        k, _, v = it.partition('=')
+        k, eq, v = it.partition('=')
+        if not eq or not k: fail(f'argument {it!r} is not key=value', 'e.g. kind=rifle d=0.5 surface=wood')
         try: out[k] = ast.literal_eval(v)
-        except (ValueError, SyntaxError): out[k] = v
+        except (ValueError, SyntaxError): out[k] = v   # bare words become strings: kind=rifle
     return out
 
 
@@ -37,16 +38,15 @@ def main():
             print(f'{name:12s} {(fn.__doc__ or "").strip().splitlines()[0] if fn.__doc__ else ""}')
         return
     if a.all:
-        os.makedirs(a.all, exist_ok=True)
-        for i, (name, fn) in enumerate(table.items()):
-            reseed(a.seed + i); write_wav(os.path.join(a.all, f'{name}.wav'), fn() * .8)
+        for i, name in enumerate(table):
+            reseed(a.seed + i); write_wav(os.path.join(a.all, f'{name}.wav'), recipes.call(table, name, {}) * .8)
         print(f'{len(table)} files -> {a.all}'); return
-    if not a.name or a.name not in table:
-        sys.exit(f'unknown recipe {a.name!r}; try --list')
+    if not a.name: fail('no recipe name given', 'e.g. render_sfx.py gunshot kind=rifle -o gun.wav  (or --list / --all DIR)')
+    if a.variants < 1: fail(f'--variants must be >= 1, got {a.variants}')
 
     kw = parse_kv(a.kwargs); takes = []
     for i in range(a.variants):
-        reseed(a.seed + i); takes.append(table[a.name](**kw))
+        reseed(a.seed + i); takes.append(recipes.call(table, a.name, kw))
     L = max(len(t) for t in takes); gap = max(n_(.5), L + n_(.15))
     x = np.zeros(gap * (len(takes) - 1) + L) if a.variants > 1 else takes[0]
     if a.variants > 1:

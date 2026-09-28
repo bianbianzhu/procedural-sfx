@@ -22,17 +22,17 @@ Put sounds on the timeline where the animation says things happen, never where i
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `dur` | recommended | Mix length in seconds. Use the video's duration exactly. |
-| `t` | yes | Seconds from the start. From frames: `t = frame / fps`. |
+| `dur` | recommended | Mix length in seconds. Use the video's duration exactly. If omitted: last event + 3 s (with a note). |
+| `t` | yes | Seconds from the start. From frames: `t = frame / fps`. Negative is allowed: the part before 0 is cut off (useful for anticipation offsets near the start). |
 | `type` | yes | Recipe name (built-in or from `--recipes`), or `"file"` for an audio file. |
 | `args` | no | Keyword arguments for the recipe. |
 | `gain` | no | Linear gain. Default: `--gains` map by type, else 0.5. |
-| `pan` | no | −1 left … 1 right. Follow the on-screen position: `pan = (x / width) * 2 - 1`, scaled by ~0.6 so nothing sits hard left or right. |
+| `pan` | no | −1 left … 1 right. Follow the on-screen position: `pan = (x / width) * 2 - 1`, scaled by ~0.6 so nothing sits hard left or right. On stereo files it acts as balance. |
 | `bus` | no | `sfx` (default) · `vo` (ducks music; default for files) · `music` · `bed`. |
-| `seed` | no | Pin this event's randomness. Default is derived from type + t, so events are independent of each other. |
+| `seed` | no | Integer that pins this event's randomness. Default is derived from type, t and args, so events are independent of each other; identical stacked events still get different takes. |
 | `file` | for `"file"` | Path relative to the events file. |
 
-`"ev"` is accepted as an alias for `"events"`.
+`"ev"` is accepted as an alias for `"events"`. `mix.py` validates the whole file before rendering and lists every problem at once (missing fields, unknown recipe names with suggestions, files that don't exist). Fix them all, then rerun.
 
 ## 2. Getting event times out of an animation stack
 

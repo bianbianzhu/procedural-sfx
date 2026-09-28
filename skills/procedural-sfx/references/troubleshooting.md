@@ -15,7 +15,7 @@
 | "Sounds fake / robotic" on repeats | Identical triggers | Randomise pitch ±5–10%, gain ±20%, pan ±0.2 per event |
 | "Sounds like a synth, not a thing" | Pure sines dominate | More noise in the attack, inharmonic partials, shorter taus |
 | "Clicks at the end" | Array cut while ringing | Longer array or shorter tail (`add()` already fades 5 ms, so a click means a hard cut *inside* the recipe, e.g. a mask like `(t > .01)`) |
-| "Click at the start" of a soft sound | Instant attack | `env_ad(d, attack=.005, tau)` instead of `env_exp` |
+| "Click at the start" of a soft sound | Instant attack | `env_ad(d, .005, tau)` instead of `env_exp` |
 | "Out of sync" | Event times not from the animation, or fps mismatch | See `event-sync.md` §4 |
 | "Can't hear X" | Masked | The `CHECK` line in the mix report, and `mixing.md` §4 |
 | "Everything is loud, nothing hits" | No dynamics: dense sound, no silence | Remove the least important sounds; leave a gap before hero hits; lower the bed |
@@ -23,14 +23,17 @@
 
 ## 2. Errors and odd behaviour
 
+The scripts exit 1 on input problems and print `error: <what and where>` followed by `fix: <what to do>`. Act on the fix line first. The table covers the remaining cases:
+
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `operands could not be broadcast … (2880,) (2881,)` | Array lengths computed with different rounding | Always build lengths with `n_(d)` / `t_(d)` / `noise(d)` for the same `d` |
 | Adding one event changed how others sound | Shared RNG in your own loop | Only through `mix.py` (it reseeds per event); in your own scripts call `reseed(n)` per sound |
 | `Digital filter critical frequencies must be 0 < Wn < fs/2` | Raw `butter` with a frequency ≥ 24 kHz | Use `bp/lp/hp` from sfxkit; they clamp below Nyquist |
-| `warning: no recipe for X` | Type typo, or `--recipes` missing | `render_sfx.py --recipes file.py --list` shows what is registered |
+| `error: … no recipe named 'X'` | Type typo, or `--recipes` missing | Follow the "did you mean" hint; `render_sfx.py --recipes file.py --list` shows what is registered |
+| `error: X (…): unknown argument(s)` | An `args` key the recipe doesn't take | The message lists the accepted arguments and their defaults |
 | Mix is slow | `compress()` is a per-sample Python loop | Use it on voice files only, once, and cache the result |
-| `error: mix contains NaN/inf` | Division by zero or `log` in a recipe | Render each recipe alone with `render_sfx.py` to find it |
+| `error: X produced NaN/inf` | Division by zero or `log(0)` in a recipe | Render it alone with `render_sfx.py` and fix the maths |
 | Recipe from a custom file not found | Function name starts with `_`, or is imported rather than defined there | Define it in that file; only its own public functions are registered |
 | Loudness after mux is off by ~0.5 LU | Single-pass loudnorm elsewhere in the chain | Use `mux.sh` (two-pass) and don't normalise twice |
 

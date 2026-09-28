@@ -43,6 +43,7 @@ def thump(v=1.0, f=70):
 
 def step(v=1.0, surface='hard'):
     """Footstep. surface: 'hard' (tile/stone), 'wood', 'soft' (carpet/grass)."""
+    if surface not in ('hard', 'wood', 'soft'): raise ValueError(f"surface must be 'hard', 'wood' or 'soft', got {surface!r}")
     d = .12; tt = t_(d); p = uniform(.9, 1.1)
     if surface == 'soft':
         x = lp(noise(d), 900 * p) * env_ad(d, .006, .025)
@@ -65,9 +66,9 @@ def creak(v=1.0):
 def whoosh(d=.35, v=1.0, lo=600, hi=3200):
     """Something flying past / a swing: band-pass noise whose centre rises then falls."""
     n = noise(d); tt = t_(d); out = np.zeros_like(n)
-    for i in range(0, len(n), 480):
-        f = lo + (hi - lo) * np.sin(np.pi * i / len(n))
-        seg = bp(n[max(0, i - 2000):i + 480], f * .7, f * 1.3)[-480:]; out[i:i + len(seg)] = seg
+    for i in range(0, len(n), 480):                 # 10 ms blocks, each filtered with 2000 samples of run-in
+        j = min(i + 480, len(n)); f = lo + (hi - lo) * np.sin(np.pi * i / len(n))
+        out[i:j] = bp(n[max(0, i - 2000):j], f * .7, f * 1.3)[-(j - i):]
     return norm(out * np.sin(np.pi * tt / d) ** 2) * v
 
 
@@ -88,8 +89,8 @@ def pop(v=1.0, f0=500, f1=1900):
 
 def beep(v=1.0, f=2525, d=.25):
     """Clean tone with 5 ms fades (radio quindar tone, cursor, timer)."""
-    x = np.sin(2 * np.pi * f * t_(d)); k = n_(.005)
-    x[:k] *= np.linspace(0, 1, k); x[-k:] *= np.linspace(1, 0, k)
+    x = np.sin(2 * np.pi * f * t_(d)); k = min(n_(.005), len(x) // 2)
+    if k: x[:k] *= np.linspace(0, 1, k); x[-k:] *= np.linspace(1, 0, k)
     return x * v
 
 
@@ -99,20 +100,26 @@ _GUNS = {'pistol':  dict(crack=.0015, boom=.035, f=90, tail=.25),
          'shotgun': dict(crack=.0025, boom=.090, f=55, tail=.60)}
 
 
-def gunshot(v=1.0, kind='pistol', drive=3.0):
-    """Gunshot: muzzle crack + pressure boom + reflections, saturated. kind: pistol | rifle | shotgun."""
-    P = _GUNS[kind]; d = 1.2; tt = t_(d)
-    crack = hp(noise(d), 3000) * env_exp(d, P['crack'])
-    boom = lp(noise(d), 600) * env_exp(d, P['boom']) + np.sin(2 * np.pi * P['f'] * tt * (1 - .4 * tt)) * env_exp(d, P['boom'] * 1.6)
-    tail = bp(noise(d), 250, 2500) * env_exp(d, P['tail']) * .12
-    return norm(sat(crack * 1.3 + boom + tail, drive)) * v
+def gunshot(v=1.0, kind='pistol', drive=3.0, crack=None, boom=None, f=None, tail=None):
+    """Gunshot: muzzle crack + pressure boom + reflections, saturated. kind: pistol | rifle | shotgun.
+
+    crack / boom / tail (decay seconds) and f (boom Hz) override the kind's preset."""
+    if kind not in _GUNS: raise ValueError(f'kind must be one of {list(_GUNS)}, got {kind!r}')
+    P = dict(_GUNS[kind]); P.update({k: v_ for k, v_ in dict(crack=crack, boom=boom, f=f, tail=tail).items() if v_ is not None})
+    d = max(1.2, P['tail'] * 5); tt = t_(d)
+    crack_ = hp(noise(d), 3000) * env_exp(d, P['crack'])
+    boom_ = lp(noise(d), 600) * env_exp(d, P['boom']) + np.sin(2 * np.pi * P['f'] * tt * (1 - .4 * np.minimum(tt, 1.2))) * env_exp(d, P['boom'] * 1.6)
+    tail_ = bp(noise(d), 250, 2500) * env_exp(d, P['tail']) * .12
+    return norm(sat(crack_ * 1.3 + boom_ + tail_, drive)) * v
 
 
-def burst(v=1.0, n=6, rate=.08, kind='rifle'):
-    """Automatic fire: n gunshots `rate` seconds apart, each slightly different."""
-    out = np.zeros(n_(n * rate + 1.3))
-    for k in range(n):
-        s = n_(k * rate); g = gunshot(uniform(.8, 1.0), kind)
+def burst(v=1.0, n=6, rate=.08, kind='rifle', drive=3.0):
+    """Automatic fire: n gunshots `rate` seconds apart, each at a random level and with fresh noise."""
+    if n < 1 or rate <= 0: raise ValueError(f'need n >= 1 and rate > 0, got n={n}, rate={rate}')
+    shots = [gunshot(uniform(.8, 1.0), kind, drive) for _ in range(n)]
+    out = np.zeros(n_((n - 1) * rate) + max(len(g) for g in shots))
+    for k, g in enumerate(shots):
+        s = n_(k * rate)
         out[s:s + len(g)] += g[:len(out) - s]
     return norm(out) * v
 
@@ -127,16 +134,15 @@ def explosion(v=1.0, d=3.0):
     return norm(sat(blast * 1.2 + sub + body * .8 + lp(debris, 7000) * .3, 2.5)) * v
 
 
-def laser(v=1.0, f0=2400, f1=300):
+def laser(v=1.0, f0=2400, f1=300, d=.3):
     """Sci-fi zap: two slightly detuned downward sweeps."""
-    d = .3
-    return norm(sweep(f0, f1, d) * env_exp(d, .09) + sweep(f0 * 1.004, f1 * 1.016, d) * env_exp(d, .09)) * v
+    return norm(sweep(f0, f1, d) * env_exp(d, d * .3) + sweep(f0 * 1.004, f1 * 1.016, d) * env_exp(d, d * .3)) * v
 
 
 # ============ ambience & drama ============
 def rumble(v=1.0, d=1.5):
     """Low rumble bed that fades in (earthquake, engine room, distant thunder)."""
-    return norm(lp(brown(d), 200)) * np.sin(np.pi * t_(d) / d / 2) ** 2 * v
+    return norm(lp(brown(d), 200) * np.sin(np.pi * t_(d) / d / 2) ** 2) * v
 
 
 def ignite(v=1.0):
@@ -149,26 +155,59 @@ def roar(v=1.0, d=3.0):
     """Sustained engine / fire roar with crackle, fades in and out."""
     tt = t_(d); b = lp(brown(d), 700); crack = hp(noise(d), 3000) * (rand(len(tt)) > .995) * 3
     e = np.minimum(1, tt / .4) * np.minimum(1, (d - tt) / .6)
-    return norm(b + lp(crack, 6000) * .3) * e * v
+    return norm((b + lp(crack, 6000) * .3) * e) * v
 
 
 def heartbeat(v=1.0):
     """Lub-dub: two low thumps 0.22 s apart."""
-    a = thump(1, 55); b = np.pad(thump(.7, 50), (n_(.22), 0))[:len(a)]
-    return (a + b) * v
+    a = thump(1, 55); b = np.pad(thump(.7, 50), (n_(.22), 0))
+    a = np.pad(a, (0, len(b) - len(a)))
+    return norm(a + b) * v
 
 
 RECIPES = {f.__name__: f for f in [click, clack, crash, thump, step, creak, whoosh, ding, pop, beep,
                                    gunshot, burst, explosion, laser, rumble, ignite, roar, heartbeat]}
 
 
+def call(table, name, args, where=''):
+    """Render recipe `name` with `args`; turn every mistake into an actionable error (see sfxkit.fail)."""
+    import inspect
+    at = f' ({where})' if where else ''
+    if name not in table:
+        import difflib
+        near = difflib.get_close_matches(name, table, 3)
+        fail(f'no recipe named {name!r}{at}', (f'did you mean {" / ".join(near)}? ' if near else '')
+             + 'list recipes with render_sfx.py --list; add your own with --recipes FILE')
+    fn = table[name]; sig = inspect.signature(fn)
+    if not isinstance(args, dict): fail(f'"args" for {name}{at} must be an object, got {args!r}', f'e.g. "args": {{"v": 1.0}}')
+    bad = [k for k in args if k not in sig.parameters]
+    if bad:
+        fail(f'{name}{at}: unknown argument(s) {bad}',
+             f'accepted: {", ".join(f"{p.name}={p.default!r}" for p in sig.parameters.values())}')
+    try:
+        x = np.asarray(fn(**args), dtype=float)
+    except Exception as ex:
+        fail(f'{name}{at} raised {type(ex).__name__}: {ex}', 'check the argument values; render it alone with render_sfx.py to debug')
+    if x.ndim != 1 or not len(x): fail(f'{name}{at} returned shape {x.shape}', 'a recipe must return a non-empty mono 1-D array')
+    if not np.isfinite(x).all(): fail(f'{name}{at} produced NaN/inf', 'look for division by zero or log(0) in the recipe')
+    return x
+
+
 def load(extra=()):
     """Built-in recipes plus every public function in each extra .py file (later files win on name clashes)."""
-    import importlib.util, inspect, os
+    import importlib.util, inspect, os, traceback
     table = dict(RECIPES)
     for path in extra or ():
+        if not os.path.isfile(path): fail(f'recipe file not found: {path}', 'pass the path to a .py file (see assets/recipe_template.py)')
         spec = importlib.util.spec_from_file_location(os.path.splitext(os.path.basename(path))[0], path)
-        mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+        mod = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(mod)
+        except Exception as ex:
+            line = ex.lineno if isinstance(ex, SyntaxError) else next(
+                (f.lineno for f in reversed(traceback.extract_tb(ex.__traceback__)) if f.filename == os.path.abspath(path)), '?')
+            fail(f'recipe file {path} failed to import at line {line}: {type(ex).__name__}: {ex}',
+                 'fix that line; recipe files should start with `from sfxkit import *`')
         for name, fn in inspect.getmembers(mod, inspect.isfunction):
             if not name.startswith('_') and fn.__module__ == mod.__name__:
                 table[name] = fn

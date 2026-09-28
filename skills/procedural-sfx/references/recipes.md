@@ -1,6 +1,6 @@
 # Built-in recipes
 
-All recipes live in `scripts/recipes.py`. Each returns a mono array normalised to peak `v`. Arguments are passed as `key=value` on the `render_sfx.py` command line, or as `"args": {...}` in events.json.
+All recipes live in `scripts/recipes.py`. Each returns a mono array normalised to peak `v`. Arguments are passed as `key=value` on the `render_sfx.py` command line, or as `"args": {...}` in events.json. Only the arguments in the Args column exist; a "custom recipe" tuning means copying the recipe into your own file and editing it.
 
 **Provenance.** Recipes marked ✓ have been used and tuned by ear in finished films. Recipes marked ◇ (weapons and sci-fi) are measured and structurally sound but not yet ear-tuned. Audition them and adjust before relying on them, and tell the user they are starting points.
 
@@ -42,10 +42,10 @@ All recipes live in `scripts/recipes.py`. Each returns a mono array normalised t
 
 | Recipe | Args | Sound and build | Tuning |
 | --- | --- | --- | --- |
-| `gunshot` | `kind='pistol'\|'rifle'\|'shotgun', drive=3` | Muzzle crack (HP noise, tau 1–2.5 ms) + pressure boom (LP noise + 55–90 Hz sine gliding down) + reflections (BP noise tail), `sat()` | Crisper: shorter `crack`; heavier: longer `boom`, lower `f`; indoors or canyon: longer `tail`, or `echo()` on top; cartoon: drive 1.5 and swap the boom for a `pop`-style sweep; distant: LP 1500 Hz, drop the crack |
-| `burst` | `n=6, rate=.08, kind='rifle'` | n gunshots `rate` s apart, each at a random level (0.8–1.0) and with fresh noise | SMG rate .06; machine gun .1; for more variety also randomise `drive` per shot |
-| `explosion` | `d=3.0` | Blast (LP noise) + sub sweep 60→25 Hz + brown-noise roar + debris crackle, saturated | Distant: LP 400 Hz, drop the blast; grenade: d=1.5; building: add `crash` 0.3 s later |
-| `laser` | `f0=2400, f1=300` | Two detuned down-sweeps | Blaster: f0=3500 f1=500 d shorter; charging: reverse the sweep and lengthen it |
+| `gunshot` | `kind='pistol'\|'rifle'\|'shotgun', drive=3`, overrides `crack`, `boom`, `tail` (decay s), `f` (boom Hz) | Muzzle crack (HP noise) + pressure boom (LP noise + 55–90 Hz sine gliding down) + reflections (BP noise tail), `sat()`. Presets: pistol crack .0015 boom .035 f 90 tail .25; rifle .001/.05/70/.45; shotgun .0025/.09/55/.6 | Crisper: `crack=.0008`; heavier: `boom=.08, f=50`; indoors or canyon: `tail=.9`, or `echo()` in a custom recipe; cartoon: `drive=1.5`; distant (custom recipe): LP 1500 Hz, drop the crack |
+| `burst` | `n=6, rate=.08, kind='rifle', drive=3` | n gunshots `rate` s apart, each at a random level (0.8–1.0) and with fresh noise | SMG `rate=.06`; machine gun `rate=.1`; lighter weapon `kind='pistol'` |
+| `explosion` | `d=3.0` | Blast (LP noise) + sub sweep 60→25 Hz + brown-noise roar + debris crackle, saturated | Grenade: `d=1.5`; building: add a `crash` event 0.3 s later; distant (custom recipe): LP 400 Hz, drop the blast |
+| `laser` | `f0=2400, f1=300, d=.3` | Two detuned down-sweeps | Blaster: `f0=3500, f1=500, d=.15`; charging: `f0=300, f1=2400, d=1.0` |
 
 ## Ambience & drama
 

@@ -65,16 +65,16 @@ Build and check one layer at a time: return just the attack, render it, then add
 
 ## 4. Rough metric targets
 
-These are heuristics for catching mistakes, not rules. Compare `analyze.py --bands` output against them (the built-in recipes fall inside these ranges):
+These are heuristics for catching mistakes, not rules. Compare `analyze.py --bands` output against them (the built-in recipes fall inside these ranges). The last column uses the band names `--bands` prints: sub < 60 Hz, low 60–250, lowmid 250–1k, mid 1–4k, high 4–10k, air > 10k.
 
 | Sound | attack | t-20 | centroid | Energy mostly in |
 | --- | --- | --- | --- | --- |
 | UI click / tick | < 2 ms | 10–60 ms | 1.5–5 kHz | mid, high |
 | Footstep (hard) | < 2 ms | 10–60 ms | 2–6 kHz | mid, high |
 | Soft impact / thump | 2–10 ms | 100–300 ms | 50–200 Hz | sub, low |
-| Gunshot | < 3 ms | 100–400 ms | 800–3000 Hz | low + mid |
+| Gunshot | < 3 ms | 100–400 ms | 800–3000 Hz | low, lowmid, mid |
 | Explosion | 5–30 ms | 0.8–2 s | 40–300 Hz | sub, low |
-| Whoosh | 80–250 ms (it swells) | ≈ a third of its length | 1–4 kHz | mid |
+| Whoosh | 80–250 ms (it swells) | ≈ a third of its length | 1–4 kHz | mid, high |
 | Bell / ding | < 2 ms | > 800 ms | 1–3 kHz | mid |
 | Rumble bed | slow | continuous | < 100 Hz | sub, low |
 
@@ -85,18 +85,11 @@ Red flags:
 
 ## 5. Worked example: a heavy door slam
 
-The recipe in `assets/recipe_template.py`:
+`assets/recipe_template.py` contains `door_slam`, built with the method above:
 
-```python
-def door_slam(v=1.0, room=True):
-    """Heavy wooden door slamming: latch click + low thump + wood rattle, optional room echo."""
-    d = .6; tt = t_(d)
-    latch = hp(noise(d), 3500) * env_exp(d, .002)                         # attack: metal latch
-    body = np.pad(thump(1, 60), (0, n_(d) - n_(.35)))                     # body: the mass (reuse a recipe)
-    rattle = bp(noise(d), 300, 1400) * env_exp(d, .06) * (1 + .5 * np.sin(2 * np.pi * 31 * tt))  # wood panel
-    x = latch * .7 + body + rattle * .5
-    if room: x = echo(x, delay=.045, feedback=.3, taps=3, damp=2500)     # tail: small hallway
-    return norm(x) * v
-```
+- **Attack**: `hp(noise(d), 3500) * env_exp(d, .002)` is the metal latch.
+- **Body**: the built-in `thump(1, 60)` supplies the door's mass, padded to the shared length with `np.pad`. Reusing a recipe as a layer is normal.
+- **Body texture**: band-passed noise with a 31 Hz amplitude wobble is the wooden panel rattling.
+- **Tail**: `echo(x, delay=.045, feedback=.3, taps=3)` is a small hallway, switched by a `room=True` argument so one recipe covers two scenes.
 
-Things to notice: it reuses a built-in (`thump`) as a layer, pads it to the shared length, and uses a 31 Hz amplitude wobble to make the panel rattle. A recipe argument (`room`) switches the tail on and off, so a single recipe covers two scenes.
+Render it with `python scripts/render_sfx.py --recipes assets/recipe_template.py door_slam -o door.wav`.

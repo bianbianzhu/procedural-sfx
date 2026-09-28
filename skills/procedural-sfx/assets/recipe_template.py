@@ -11,10 +11,11 @@ Rules that keep recipes composable:
   - write the docstring's first line as "what it sounds like: how it is built"
 """
 import os, sys
-# mix.py and render_sfx.py already put the skill's scripts/ on the path; SFX_SCRIPTS is only for standalone use
-sys.path.insert(0,os.environ.get('SFX_SCRIPTS', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts')))
+# mix.py and render_sfx.py already put the skill's scripts/ on the path. To import this file on its own,
+# set SFX_SCRIPTS=<skill>/scripts (the default below works while the file still sits in the skill's assets/).
+sys.path.insert(0, os.environ.get('SFX_SCRIPTS', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts')))
 from sfxkit import *                      # primitives: noise, env_exp, bp/lp/hp, sweep, sat, echo, ...
-from recipes import thump, clack          # reuse built-in recipes as layers
+from recipes import thump                 # reuse built-in recipes as layers
 
 
 def door_slam(v=1.0, room=True):

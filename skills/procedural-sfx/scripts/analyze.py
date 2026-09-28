@@ -26,6 +26,7 @@ def envelope_db(x):
 
 
 def describe(x):
+    if len(x) < HOP: x = np.pad(x, (0, HOP - len(x)))      # shorter than one 10 ms frame
     peak_i = int(np.abs(x).argmax()); peak = np.abs(x).max()
     pk_db = 20 * np.log10(peak + 1e-12)
     above = np.nonzero(np.abs(x) > peak * .01)[0]            # -40 dB relative
@@ -54,7 +55,9 @@ def main():
     ms = lambda v: '   >end' if np.isnan(v) else f'{v:5.0f}ms'     # >end: still ringing when the file stops
     print(f'{"file":22s} {"dur":>6s} {"peak":>6s} {"rms":>6s} {"attack":>7s} {"t-20":>7s} {"t-40":>7s} {"centroid":>9s}')
     for f in a.files:
-        x = read_wav(f, mono=True); d = describe(x)
+        x = read_wav(f, mono=True)
+        if not np.abs(x).max() > 0: print(f'{os.path.basename(f)[:22]:22s} silent (all zeros)'); continue
+        d = describe(x)
         print(f'{os.path.basename(f)[:22]:22s} {d["dur"]:6.2f} {d["peak"]:6.1f} {d["rms"]:6.1f} '
               f'{d["attack"]:5.1f}ms {ms(d["t20"])} {ms(d["t40"])} {d["centroid"]:7.0f}Hz')
         if a.bands:

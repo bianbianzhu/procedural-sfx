@@ -17,7 +17,7 @@
 | `music` | `--music` file, `bus: music` events | 1.0 | Ducked by `--duck-db` (default 8 dB) under voice, with 0.25 s smoothing |
 | `bed` | `--bed RECIPE`, `bus: bed` events | 1.0 | Room tone, rumble, wind; `--bed-gain` default 0.03 (about −30 dB) |
 
-After summing the buses, `mix.py` checks for NaN, applies a linked stereo look-ahead limiter at `--ceiling` (0.95), writes a float32 wav at 48 kHz, and optionally writes each bus to `--stems DIR` for inspection or for someone else to remix.
+After summing the buses, `mix.py` checks for NaN, applies a linked stereo look-ahead limiter at `--ceiling` (0.95), writes a 32-bit float wav at 48 kHz, and optionally writes each bus to `--stems DIR` (also float, so a hot bus is not clipped on disk) for inspection or for someone else to remix.
 
 ## 2. Gain staging
 
@@ -36,17 +36,16 @@ Put type defaults in a `--gains gains.json` map (`{"step": 0.3, "gunshot": 0.7}`
 ## 3. Reading the mix report
 
 ```
-mix.wav  14.00s  9 events
-  sfx    rms(active)  -13.4 dB   peak 0.76
-  vo     rms(active)  -17.5 dB   peak 0.19
-  music  rms(active)  -28.2 dB   peak 0.25
-  bed    rms(active)  -46.3 dB   peak 0.02
-  masking: 9/9 events clear the rest of the mix in at least one band
-  pre-limit peak 0.97 -> 0.95
+mix.wav  14.00s  8 of 8 events placed
+  sfx    rms(active)  -14.1 dB   peak 0.76
+  bed    rms(active)  -44.8 dB   peak 0.03
+  masking: 8/8 events clear the rest of the mix in at least one band
+  pre-limit peak 0.76 -> 0.76
 ```
 
+- **N of M events placed**: events starting after `dur` or ending before 0 are skipped with a warning.
 - **rms(active)** is loudness while the bus is actually sounding. In dialogue-driven pieces, keep `vo` the loudest of `vo`, `music` and the steady parts of `sfx`. Short hero hits may exceed it.
-- **masking** gives, for each event, its best signal-to-masker ratio across three bands (low/mid/high) in its most exposed 30 ms frame within its first 0.3 s. It is compared against everything else playing at that moment. Below `--min-smr` (default 0 dB) gets a `CHECK` line.
+- **masking** gives, for each event, its best signal-to-masker ratio across both channels and three bands (low/mid/high) in its most exposed 30 ms frame within its first 0.3 s. It is compared against everything else playing at that moment, so panning apart counts. Below `--min-smr` (default 0 dB) gets a `CHECK` line.
 - **pre-limit peak** above about 2 × the ceiling means the limiter is flattening things. Lower gains instead of relying on it.
 
 ## 4. Fixing masking
@@ -61,7 +60,7 @@ A `CHECK` line means that sound will probably not be heard. In order of preferen
 
 ## 5. Loudness targets and muxing
 
-`sh scripts/mux.sh video.mp4 mix.wav out.mp4 [LUFS] [dBTP]` measures in a first pass, then normalises exactly in a second (a single pass misses by about 0.5 LU). It copies the video stream, encodes AAC 256k, and prints the measured integrated loudness and peak of the result.
+`sh scripts/mux.sh video.mp4 mix.wav out.mp4 [LUFS] [dBTP]` measures in a first pass, then normalises in a second (lands within about ±0.5 LU of the target; a single pass drifts further). It refuses silent or sub-0.4 s audio with an explanation, since loudness can't be measured there. It copies the video stream, encodes AAC 256k, and prints the measured integrated loudness and peak of the result.
 
 | Destination | Integrated | True peak |
 | --- | --- | --- |

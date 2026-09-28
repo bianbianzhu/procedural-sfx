@@ -1,0 +1,48 @@
+# Troubleshooting and QA
+
+## Contents
+1. Listener complaints → fixes
+2. Errors and odd behaviour
+3. Final QA checklist
+
+## 1. Listener complaints → fixes
+
+| They say | Likely cause | Fix |
+| --- | --- | --- |
+| "Too thin / no weight" | No low body | Add a 40–90 Hz sine gliding down; lengthen body tau |
+| "Muddy / boomy" | Too much < 250 Hz, or low tails overlapping | High-pass supporting foley at 150–300 Hz; shorten low tails |
+| "Harsh / piercing" | Too much 2–5 kHz, or saturation drive too high | Lower the attack level; lower `sat` drive; low-pass at 8–10 kHz |
+| "Sounds fake / robotic" on repeats | Identical triggers | Randomise pitch ±5–10%, gain ±20%, pan ±0.2 per event |
+| "Sounds like a synth, not a thing" | Pure sines dominate | More noise in the attack, inharmonic partials, shorter taus |
+| "Clicks at the end" | Array cut while ringing | Longer array or shorter tail (`add()` already fades 5 ms, so a click means a hard cut *inside* the recipe, e.g. a mask like `(t > .01)`) |
+| "Click at the start" of a soft sound | Instant attack | `env_ad(d, attack=.005, tau)` instead of `env_exp` |
+| "Out of sync" | Event times not from the animation, or fps mismatch | See `event-sync.md` §4 |
+| "Can't hear X" | Masked | The `CHECK` line in the mix report, and `mixing.md` §4 |
+| "Everything is loud, nothing hits" | No dynamics: dense sound, no silence | Remove the least important sounds; leave a gap before hero hits; lower the bed |
+| "Too cartoony" / "not cartoony enough" | Style mismatch | Cartoony: pure sweeps, exaggerated glides, little saturation. Realistic: noise, inharmonic partials, short reflections |
+
+## 2. Errors and odd behaviour
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `operands could not be broadcast … (2880,) (2881,)` | Array lengths computed with different rounding | Always build lengths with `n_(d)` / `t_(d)` / `noise(d)` for the same `d` |
+| Adding one event changed how others sound | Shared RNG in your own loop | Only through `mix.py` (it reseeds per event); in your own scripts call `reseed(n)` per sound |
+| `Digital filter critical frequencies must be 0 < Wn < fs/2` | Raw `butter` with a frequency ≥ 24 kHz | Use `bp/lp/hp` from sfxkit; they clamp below Nyquist |
+| `warning: no recipe for X` | Type typo, or `--recipes` missing | `render_sfx.py --recipes file.py --list` shows what is registered |
+| Mix is slow | `compress()` is a per-sample Python loop | Use it on voice files only, once, and cache the result |
+| `error: mix contains NaN/inf` | Division by zero or `log` in a recipe | Render each recipe alone with `render_sfx.py` to find it |
+| Recipe from a custom file not found | Function name starts with `_`, or is imported rather than defined there | Define it in that file; only its own public functions are registered |
+| Loudness after mux is off by ~0.5 LU | Single-pass loudnorm elsewhere in the chain | Use `mux.sh` (two-pass) and don't normalise twice |
+
+## 3. Final QA checklist
+
+Run through this before handing over:
+
+- [ ] `check_env.py` passes; every recipe used renders alone without error.
+- [ ] Each new or changed recipe has been through `analyze.py --bands` and sits near its row in `design-method.md` §4.
+- [ ] Repeated sounds were auditioned with `render_sfx.py … --variants 4` and vary.
+- [ ] `mix.py` report: no `warning`, no `CHECK` lines (or each one consciously accepted), pre-limit peak < 2 × ceiling.
+- [ ] `vo` is the loudest sustained bus when there is dialogue; the bed sits 25 dB or more below it.
+- [ ] `mux.sh` result is within ±1 LU of the target, and the true peak is under the limit.
+- [ ] Stills at three or more event times show the matching visual moment.
+- [ ] The user has been given the new or ◇ sounds as separate wavs and asked to listen. State plainly which sounds nobody has heard yet.

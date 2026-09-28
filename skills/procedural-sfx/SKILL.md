@@ -1,0 +1,60 @@
+---
+name: procedural-sfx
+description: Synthesize sound effects from code (numpy/scipy, no sample libraries) and mix them frame-accurately under a video or animation. Covers gunshots, explosions, impacts, footsteps, whooshes, UI clicks and dings, sci-fi zaps, rumbles and ambience beds, plus event-driven mixing with voice ducking, masking checks and loudness-normalised muxing. Use this skill whenever someone wants sound effects, foley or a soundtrack for a code-rendered video, animation, explainer, motion graphic, data-viz video or game prototype; asks how to make a specific sound (枪声, 爆炸, 脚步, 音效, 拟音, "a laser sound", "a door slam"); needs royalty-free SFX with no licensing questions; or needs audio synced to events in an animation, even if they never say "procedural" or "synthesis".
+---
+
+# Procedural SFX
+
+Make every sound effect from noise, sine waves, filters and envelopes, then place each one on the exact frame where it happens. You get sounds with no licence attached that render identically on every run and stay in sync with the picture automatically.
+
+This works best for stylised work: animation, explainers, UI, motion graphics, game prototypes. For photoreal film foley (a specific real gun, real footsteps on real gravel) a recorded sample is still better. The mixer accepts audio files too (`"type": "file"`), so hybrids are fine.
+
+## Setup
+
+```bash
+pip install -r scripts/requirements.txt   # numpy, scipy, soundfile
+python scripts/check_env.py               # verifies them; ffmpeg is optional (only for muxing)
+```
+
+All scripts live in `scripts/` and run from anywhere. Paths below are relative to this skill's directory.
+
+## Workflow
+
+1. **Spot the sounds.** List every moment that needs a sound: time, what happens, what material is involved (plastic, wood, metal, air, electricity). Material decides the recipe, not the action's name: "a coin landing" and "a key dropping" are both small metal impacts. Plan the silences as well. A beat of quiet before a big hit makes it land harder than extra volume does.
+
+2. **Pick or design each sound.** Run `python scripts/render_sfx.py --list` to see the built-in recipes. If one fits, render it with arguments and audition it. If none fits, write a new recipe in a project file based on `assets/recipe_template.py`.
+   - Read `references/design-method.md` before writing a new recipe. It explains the attack/body/tail layering and which number changes what you hear.
+   - Read `references/recipes.md` for what each built-in does, its parameters, and variations such as gun types, surfaces and distances.
+
+3. **Check each sound by numbers.** You cannot hear the output, so measure it: `python scripts/analyze.py sound.wav --bands`. Compare attack, ring time, spectral centroid and band balance against what the sound should be. `references/design-method.md` has rough targets. Also render several takes with `--variants 4` to confirm repeated sounds vary.
+
+4. **Write the event list.** `events.json` is one entry per sound with time, type, args, gain and pan (`assets/events.example.json`). Take the times from the same constants that drive the animation rather than retyping them. See `references/event-sync.md` for the schema, exporting from different animation stacks, and anticipation offsets such as a whoosh that starts before its impact.
+
+5. **Mix.** Run `python scripts/mix.py events.json -o mix.wav [--recipes my_recipes.py] [--music score.wav] [--bed rumble] [--stems stems/]`. It prints levels per bus and a masking report that flags events buried under louder sounds. Fix every `CHECK` line. See `references/mixing.md` for gain staging, ducking and fixes for masking.
+
+6. **Put it under the picture.** Run `sh scripts/mux.sh video.mp4 mix.wav out.mp4 [-14]`. This does two-pass loudness normalisation (−14 LUFS for web/social; other targets are in `references/mixing.md`) and prints the measured result.
+
+7. **Hand off for listening.** Numbers catch broken sounds but not ugly ones. Tell the user which sounds are new or untuned, render them as separate wavs (`render_sfx.py --all dir/` or `--stems`), and ask them to listen. If something is off, `references/troubleshooting.md` maps complaints like "too thin", "clicks at the end" or "sounds robotic" to fixes, and has the final QA checklist.
+
+## Scripts
+
+| Script | Purpose |
+| --- | --- |
+| `scripts/sfxkit.py` | Library: noise, envelopes, filters, sweeps, saturation, echo, radio FX, limiter, `add()` for placing sounds, wav I/O |
+| `scripts/recipes.py` | 18 built-in recipes + `load()` that merges your project recipe files |
+| `scripts/render_sfx.py` | Render one recipe, variants, or all recipes to wav for audition |
+| `scripts/analyze.py` | Metrics per file: peak, RMS, attack, ring time, spectral centroid, band energy |
+| `scripts/mix.py` | events.json → stereo mix with buses, ducking, limiter, stems, masking report |
+| `scripts/mux.sh` | Two-pass loudnorm + mux under a video (ffmpeg) |
+| `scripts/check_env.py` | Check dependencies |
+
+## Built-in recipes
+
+Impacts: `click`, `clack`, `crash`, `thump`, `step` (hard/wood/soft), `creak` · Motion: `whoosh` · UI: `ding`, `pop`, `beep` · Weapons & sci-fi: `gunshot` (pistol/rifle/shotgun), `burst`, `explosion`, `laser` · Ambience & drama: `rumble`, `ignite`, `roar`, `heartbeat`. The weapons and sci-fi group are starting points that still need tuning by ear (see `references/recipes.md`).
+
+## Principles
+
+- **One recipe = one normalised sound; gain lives in the event list.** Recipes end with `norm(x) * v`, and loudness is set only by `gain` in events.json. Mixing is then a matter of editing one table.
+- **Randomness only through `noise()`, `rand()`, `uniform()`.** `mix.py` seeds each event from its type and time, so adding an event never changes how other events sound, and every render is byte-identical.
+- **Vary repeated sounds.** Identical repeats (footsteps, gunfire, typing) sound fake. Randomise pitch by ±5–10%, level by ±20% and pan slightly.
+- **Timing comes from the animation, not from your ears.** When sync is off, the fix is almost always in how the event times were produced, not a nudge in the mix.

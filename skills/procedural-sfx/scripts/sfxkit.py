@@ -126,8 +126,9 @@ def true_peak(x):
 
 
 def true_peak_db(x):
-    """True peak in dBTP (0 dBTP = full scale). Use this wherever a peak is reported against a delivery limit."""
-    return 20 * np.log10(true_peak(x).max(initial=0) + 1e-12)
+    """True peak in dBTP (0 dBTP = full scale; -inf for silence). Use it wherever a peak is reported against a limit."""
+    m = true_peak(x).max(initial=0)
+    return 20 * np.log10(m) if m > 0 else -np.inf
 
 
 def _limit_pass(x, c, n):

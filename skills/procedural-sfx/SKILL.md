@@ -30,19 +30,19 @@ All scripts live in `scripts/` and run from anywhere. Paths below are relative t
 
 4. **Write the event list.** `events.json` is one entry per sound with time, type, args, gain and pan. `assets/events.example.json` is a runnable example; voice lines and recorded audio go in as `"type": "file"` events. Take the times from the same constants that drive the animation rather than retyping them. See `references/event-sync.md` for the schema, exporting from different animation stacks, and anticipation offsets such as a whoosh that starts before its impact.
 
-5. **Mix.** Run `python scripts/mix.py events.json -o mix.wav [--recipes my_recipes.py] [--music score.wav] [--bed rumble] [--stems stems/]`. It validates the whole events file first, then prints levels per bus and a masking report that flags events buried under louder sounds. Fix every `CHECK` line. See `references/mixing.md` for gain staging, ducking and fixes for masking.
+5. **Mix.** Run `python scripts/mix.py events.json -o mix.wav [--recipes my_recipes.py] [--music score.wav] [--bed rumble] [--stems stems/]`. It validates the whole events file first, then prints levels per bus, a masking report that flags events buried under louder sounds, and the true peak before and after its limiter (ceiling −1 dBTP). Fix every `CHECK` line. See `references/mixing.md` for gain staging, ducking and fixes for masking.
 
 6. **Master for delivery.** Both scripts measure the mix, apply one linear gain to reach the loudness target (−14 LUFS for web/social; others in `references/mixing.md` §5) and print the re-measured result. They never compress; if the target would push the true peak over the limit they stop and name the loudest reachable target.
    - With a video: `sh scripts/mux.sh video.mp4 mix.wav out.mp4 [LUFS=-14] [dBTP=-1]`.
    - Audio only: `sh scripts/master.sh mix.wav final.wav [LUFS=-14] [dBTP=-1]`.
 
-7. **Hand off for listening.** Numbers catch broken sounds but not ugly ones. The mix report ends with a "not ear-tuned yet" list: every placed sound whose recipe status is `starting point` or `new`. Render each of those on its own (`render_sfx.py <recipe> <args> -o <file>.wav`, same args as in events.json) and hand off with a table, one row per sound: sound · recipe · status (`tuned` / `starting point` / `new`) · file to audition. Ask the user to listen to every row that isn't `tuned`. If something is off, `references/troubleshooting.md` maps complaints like "too thin", "clicks at the end" or "sounds robotic" to fixes, and has the final QA checklist.
+7. **Hand off for listening.** Numbers catch broken sounds but not ugly ones. The mix report ends with a "not ear-tuned yet" list: every placed sound whose recipe status is `starting point` or `new`. Render each of those on its own (`render_sfx.py [--recipes FILE] <recipe> <args> -o <file>.wav`, same args as in events.json) and hand off with a table, one row per sound: sound · recipe · status (`tuned` / `starting point` / `new`) · file to audition. Ask the user to listen to every row that isn't `tuned`. If something is off, `references/troubleshooting.md` maps complaints like "too thin", "clicks at the end" or "sounds robotic" to fixes, and has the final QA checklist.
 
 ## Scripts
 
 | Script | Purpose |
 | --- | --- |
-| `scripts/sfxkit.py` | Library: noise, envelopes, filters, sweeps, saturation, echo, radio FX, limiter, `add()` for placing sounds, wav I/O |
+| `scripts/sfxkit.py` | Library: noise, envelopes, filters, sweeps, saturation, echo, radio FX, true-peak meter and limiter, `add()` for placing sounds, wav I/O |
 | `scripts/recipes.py` | 18 built-in recipes + `load()` that merges your project recipe files |
 | `scripts/render_sfx.py` | Render one recipe, variants, or all recipes to wav for audition |
 | `scripts/analyze.py` | Metrics per file: peak, RMS, attack, ring time, spectral centroid, band energy |

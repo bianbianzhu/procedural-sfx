@@ -10,8 +10,12 @@ An agent skill for making sound effects from code (numpy + scipy, no sample libr
 ## Install
 
 ```bash
-npx skills add bianbianzhu/procedural-sfx
+npx skills add bianbianzhu/procedural-sfx                        # interactive: pick agents and scope
+npx skills add bianbianzhu/procedural-sfx --agent claude-code -y # non-interactive, project scope (.claude/skills/)
+npx skills add bianbianzhu/procedural-sfx --agent claude-code -g -y # user-level install
 ```
+
+The CLI also writes a `skills-lock.json` in the project; commit it if you want teammates to get the same version.
 
 Or copy `skills/procedural-sfx/` into your agent's skills directory (for Claude Code: `~/.claude/skills/` or `.claude/skills/` in a project).
 

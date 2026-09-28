@@ -29,8 +29,8 @@ isnum() { printf '%s' "$1" | grep -Eq '^[+-]?[0-9]+([.][0-9]+)?$'; }
 [ -d "$(dirname "$O")" ] || err "output folder does not exist: $(dirname "$O")" "create it first"
 [ "$A" -ef "$O" ] && err "output is the input file (same file, maybe via a symlink or hard link): $O" \
   "write to a new file, e.g. master.wav"
-isnum "$I" && calc "exit !($I >= -70 && $I <= 0)" \
-  || err "target loudness must be a number of LUFS in [-70, 0], got '$I'" "e.g. -14 (web), -16 (podcast), -23 (EBU R128)"
+isnum "$I" && calc "exit !($I >= -60 && $I <= 0)" \
+  || err "target loudness must be a number of LUFS in [-60, 0], got '$I'" "e.g. -14 (web), -16 (podcast), -23 (EBU R128)"
 isnum "$TP" && calc "exit !($TP >= -9 && $TP <= 0)" \
   || err "true-peak limit must be a number of dBTP in [-9, 0], got '$TP'" "e.g. -1 (most platforms) or -2 (ATSC broadcast)"
 
@@ -57,7 +57,7 @@ check_peak() {   # refuse a gain that would put the true peak over the limit, na
   if calc "exit !($IN_TP + $GAIN <= $TP)"; then   # only the rounding allowance tips it over: say so
     WHY="$WHY, or up to $(calc "printf \"%+.2f\", $IN_TP + $GAIN + .05") dBTP since the meter prints one decimal (limit $TP, so it is checked against $(calc "printf \"%.2f\", $TP - .05"))."
   else WHY="$WHY (limit $TP)."; fi
-  calc "exit !($REACH < -70)" && err "$WHY No target above -70 LUFS fits: the loudest peaks dwarf everything else." \
+  calc "exit !($REACH < -60)" && err "$WHY No target above -60 LUFS fits: the loudest peaks dwarf everything else." \
     "lower the gain of the loudest events in events.json (or raise the quiet ones) and remix"
   err "$WHY The loudest target a clean gain change can reach is $REACH LUFS." \
       "accept that quieter target by passing $REACH as the LUFS argument, or lower the gain of the loudest events in events.json (their peaks limit the whole mix) and remix"

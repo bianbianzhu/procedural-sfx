@@ -26,9 +26,12 @@ sh "$(dirname "$0")/master.sh" "$A" "$TMP/master.wav" "$I" "$TP" >"$TMP/master.l
 ffmpeg -y -loglevel error -i "$V" -i "$TMP/master.wav" \
   -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -b:a 256k -movflags +faststart -shortest "$PART" >"$TMP/log" 2>&1 \
   || err "ffmpeg failed while writing $O: $(head -3 "$TMP/log" | tr '\n' ' ')" "check that $V has a video stream and that the folder for $O is writable"
+# verify the finished mp4 (it decodes and its loudness can be measured) BEFORE it replaces anything at $O
+ffmpeg -hide_banner -nostats -i "$PART" -af ebur128=peak=true:framelog=verbose -f null - >"$TMP/meter" 2>&1 \
+  || err "the encoded file does not decode: $(grep -m1 -iE 'error|invalid' "$TMP/meter")" "rerun; if it persists, check disk space and the ffmpeg install"
+M=$(awk '/Summary:/ { s = 1 } s && $1 == "I:" { i = $2 } s && $1 == "Peak:" { p = $2 } END { if (i != "" && p != "") print i, p }' "$TMP/meter")
+[ -n "$M" ] || err "could not measure the encoded file's loudness" "rerun; if it persists, check the ffmpeg install"
 mv -f "$PART" "$O" || err "could not move the result into place: $O" "check permissions on $O"
 echo "$O"
 sed 1d "$TMP/master.log"                                   # master.sh's gain and loudness line (its temp path dropped)
-ffmpeg -hide_banner -nostats -i "$O" -af ebur128=peak=true:framelog=verbose -f null - 2>&1 \
-  | awk '/Summary:/ { s = 1 } s && $1 == "I:" { i = $2 } s && $1 == "Peak:" { p = $2 }
-         END { printf "  after AAC: %s LUFS, true peak %s dBTP\n", i, p }'
+set -- $M; printf '  after AAC: %s LUFS, true peak %s dBTP\n' "$1" "$2"

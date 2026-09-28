@@ -31,6 +31,7 @@ Put sounds on the timeline where the animation says things happen, never where i
 | `bus` | no | `sfx` (default) · `vo` (ducks music; default for files) · `music` · `bed`. |
 | `seed` | no | Integer that pins this event's randomness. Default is derived from type, t and args, so events are independent of each other; identical stacked events still get different takes. |
 | `file` | for `"file"` | Path relative to the events file. |
+| `name` | no | What the sound is, in the user's words ("angry cat", "torch flare"). Shown in the `sound` column of the report's not-ear-tuned table; without it the recipe's one-line description is used. |
 
 `"ev"` is accepted as an alias for `"events"`. `mix.py` validates the whole file before rendering and lists every problem at once (missing fields, unknown recipe names with suggestions, files that don't exist). Fix them all, then rerun.
 

@@ -12,4 +12,6 @@ for mod in ('numpy', 'scipy', 'soundfile'):
         print(f'{mod:10s} MISSING   -> pip install -r requirements.txt'); ok = False
 ff = shutil.which('ffmpeg')
 print(f'ffmpeg     {ff or "missing (optional: only needed for master.sh / mux.sh)"}')
+fp = shutil.which('ffprobe')
+print(f'ffprobe    {fp or "missing (optional: only needed for mux.sh; it ships with ffmpeg)"}')
 sys.exit(0 if ok else 1)

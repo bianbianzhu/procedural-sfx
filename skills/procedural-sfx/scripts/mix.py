@@ -9,7 +9,7 @@ Field reference: references/event-sync.md section 1. Example: assets/events.exam
 Anything on the vo bus ducks the music bus. File paths are relative to the events file.
 Exit status: 0 = mix written; 1 = input problem, explained on stderr as "error: ... / fix: ...".
 """
-import argparse, json, os, sys, zlib
+import argparse, json, os, re, sys, zlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sfxkit import SR, np, reseed, add, limit, read_wav, write_wav, db, n_, fail
 import recipes
@@ -55,6 +55,7 @@ def validate(E, table, path):
                 problems.append(f'{at}: "{k}" must be a number in [{lo}, {hi}], got {e[k]!r}')
         if e.get('bus', 'sfx') not in BUSES: problems.append(f'{at}: "bus" must be one of {list(BUSES)}, got {e.get("bus")!r}')
         if 'seed' in e and not isinstance(e['seed'], int): problems.append(f'{at}: "seed" must be an integer')
+        if 'name' in e and not isinstance(e['name'], str): problems.append(f'{at}: "name" must be a string (what the sound is, for the hand-off table)')
         if 'args' in e and not isinstance(e['args'], dict): problems.append(f'{at}: "args" must be an object')
     import difflib
     for ty, idx in unknown.items():
@@ -72,18 +73,24 @@ def validate(E, table, path):
 
 def masking_report(placed, mix, min_smr, span=.3, frame=.03):
     """Signal-to-masker ratio per event: its own energy vs everything else in the mix, per channel and band, in
-    30 ms frames over its first 0.3 s. The best (channel, frame, band) counts: the ear catches a sound where it is
-    most exposed. Returns (flagged, unassessed)."""
+    30 ms frames over two 0.3 s windows: from its start, and from its onset, the first 30 ms frame within 6 dB of its
+    own loudest (so a bed that fades in is judged once it is up, and a compound sound whose exposed attack comes well
+    before a louder body is still judged on the attack). The best (channel, frame, band) over both counts: the ear
+    catches a sound where it is most exposed. Returns (flagged, unassessed)."""
     bands = [('low', 20, 250), ('mid', 250, 4000), ('high', 4000, 20000)]
     F = n_(frame); fq = np.fft.rfftfreq(F, 1 / SR)
     masks = [(name, (fq >= lo) & (fq < hi)) for name, lo, hi in bands]
     flagged, unassessed = [], []
     for label, t, own2 in placed:                  # own2: (len, 2) contribution as mixed
-        s = n_(t); k = min(len(own2), n_(span), len(mix) - s)
-        if k <= 0: unassessed.append((label, t)); continue
+        s = n_(t); e = np.square(own2[:max(0, len(mix) - s)]).sum(1); nf = len(e) // F
+        fe = e[:nf * F].reshape(nf, F).sum(1) if nf else e[:1]
+        o = int(np.argmax(fe >= fe.max() * .25)) * F if nf and fe.max() > 0 else 0
+        L = min(len(own2), len(mix) - s)
+        if L <= 0: unassessed.append((label, t)); continue
+        starts = sorted({i for w0 in {0, o} for i in range(w0, max(w0 + 1, min(L, w0 + n_(span)) - F + 1), F // 2) if i < L})
         best = (-999.0, '')
-        for i in range(0, max(1, k - F + 1), F // 2):
-            j = min(i + F, k); w = np.hanning(j - i)
+        for i in starts:
+            j = min(i + F, L); w = np.hanning(j - i)
             for c in (0, 1):
                 own = own2[i:j, c]; rest = mix[s + i:s + j, c] - own
                 O = np.abs(np.fft.rfft(own * w, F)) ** 2; R = np.abs(np.fft.rfft(rest * w, F)) ** 2
@@ -105,6 +112,35 @@ def place(buf, x, t, gain=1.0, pan=0.0):
     return s, x2
 
 
+def plan_audition(unheard, d, protected):
+    """One file per unheard (recipe, args): <recipe>.wav, then <recipe>--2.wav ... ('-' cannot occur in a recipe name,
+    so no generated name can equal another recipe's). Refuses, before any audition file is written, a name that is the
+    mix, a stem or an input (compared by real path and, for existing files, by device and inode, so links and case
+    variants count; it runs after the mix and stems are written, so they exist)."""
+    out, used = {}, {}
+    for key in unheard:
+        n = used[key[0]] = used.get(key[0], 0) + 1
+        out[key] = os.path.join(d, f'{key[0]}.wav' if n == 1 else f'{key[0]}--{n}.wav')
+    ids = lambda p: {os.path.realpath(p)} | ({(os.stat(p).st_dev, os.stat(p).st_ino)} if os.path.exists(p) else set())
+    guard = set().union(*(ids(p) for p in protected))
+    clash = [p for p in out.values() if ids(p) & guard]
+    if clash: fail(f'--audition {d} would overwrite the mix, a stem or an input: {", ".join(clash)}',
+                   'give --audition its own folder, e.g. --audition audition/')
+    return out
+
+
+def audition(unheard, table, paths):
+    """Render each unheard (recipe, args) alone, with the seed of its first placement in the mix."""
+    for key, r in unheard.items():
+        os.makedirs(os.path.dirname(paths[key]) or '.', exist_ok=True)
+        reseed(r['seed']); write_wav(paths[key], recipes.call(table, key[0], r['args'], f'--audition {key[0]}'), peak=.8)
+
+
+def cell(v):
+    """A value made safe for one Markdown table cell: no line breaks, pipes escaped."""
+    return ' '.join(str(v).split()).replace('|', '\\|')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('events'); ap.add_argument('-o', '--out', default='mix.wav')
@@ -119,6 +155,8 @@ def main():
     ap.add_argument('--stems', metavar='DIR', help='also write each bus as its own wav')
     ap.add_argument('--min-smr', type=float, default=0.0,
                     help='flag events whose best band is less than this many dB above everything else playing')
+    ap.add_argument('--audition', metavar='DIR', help='render each sound nobody has ear-tuned on its own into DIR '
+                    '(same args and take as in the mix) and print the hand-off table with those files')
     a = ap.parse_args()
     if not -6 <= a.ceiling <= 0:
         fail(f'--ceiling is a true-peak ceiling in dBTP and must be in [-6, 0], got {a.ceiling}',
@@ -134,7 +172,7 @@ def main():
     bus = {k: np.zeros((N, 2)) for k in BUSES}
     vo_on = np.zeros(N)
     placed, seen = [], {}                          # placed: (label, t, stereo contribution) for the masking report
-    unheard, tuned = {}, 0                         # (recipe, status) -> event times, for sounds nobody has tuned by ear
+    unheard, tuned = {}, 0                         # (recipe, args) -> row, for sounds nobody has tuned by ear
 
     for i, e in enumerate(events):
         ty, t = e['type'], float(e['t'])
@@ -146,7 +184,7 @@ def main():
         else:
             key = f'{ty}@{t:.4f}:{json.dumps(e.get("args", {}), sort_keys=True)}'
             seen[key] = seen.get(key, 0) + 1       # identical stacked events still get different takes
-            reseed(e.get('seed', zlib.crc32(f'{key}#{seen[key]}'.encode())))
+            seed = e.get('seed', zlib.crc32(f'{key}#{seen[key]}'.encode())); reseed(seed)
             x = recipes.call(table, ty, e.get('args', {}), f'events[{i}] at {t}s'); label = ty
         if t < 0 and len(x) <= n_(-t):
             print(f'warning: events[{i}] {ty} at {t}s ends before 0; skipped'); continue
@@ -154,7 +192,9 @@ def main():
         if b == 'vo': vo_on[s:s + len(contrib)] = 1
         placed.append((label, max(t, 0.0), contrib * BUS_GAIN[b]))
         if ty != 'file' and (st := recipes.status(table, ty, e.get('args', {}))) != 'tuned':
-            unheard.setdefault((ty, st), []).append(f'{max(t, 0.0):.2f}s')
+            row = unheard.setdefault((ty, json.dumps(e.get('args', {}), sort_keys=True)),
+                                     dict(name=e.get('name', ''), status=st, args=e.get('args', {}), seed=seed, at=[]))
+            row['at'].append(f'{max(t, 0.0):.2f}s')
         elif ty != 'file': tuned += 1
 
     if a.music:
@@ -163,9 +203,11 @@ def main():
     if a.bed:
         import inspect
         reseed(1); has_d = a.bed in table and 'd' in inspect.signature(table[a.bed]).parameters
-        x = recipes.call(table, a.bed, {'d': dur} if has_d else {}, '--bed')
+        bargs = {'d': dur} if has_d else {}           # the same args for rendering and for its status
+        x = recipes.call(table, a.bed, bargs, '--bed')
         add(bus['bed'], np.resize(x, N), 0, a.bed_gain)
-        if (st := recipes.status(table, a.bed, {})) != 'tuned': unheard.setdefault((a.bed, st), []).append('0.00s (--bed)')
+        if (st := recipes.status(table, a.bed, bargs)) != 'tuned':
+            unheard[(a.bed, '--bed')] = dict(name='bed', status=st, args=bargs, seed=1, at=['0.00s (--bed)'])
         else: tuned += 1
 
     # duck music under voice: smooth the on/off mask over 0.25 s so the dip breathes in and out
@@ -182,6 +224,11 @@ def main():
     if a.stems:
         for k in BUSES:
             if bus[k].any(): write_wav(os.path.join(a.stems, f'{k}.wav'), bus[k] * BUS_GAIN[k])
+    if a.audition:                                 # settle the audition paths now that the mix and stems exist
+        protected = [a.out, a.events] + [os.path.join(a.stems, f'{k}.wav') for k in BUSES if a.stems] \
+            + ([a.music if os.path.isabs(a.music) else os.path.join(base, a.music)] if a.music else []) \
+            + [os.path.join(base, e['file']) for e in events if e.get('type') == 'file']
+        apaths = plan_audition(unheard, a.audition, protected)
 
     print(f'{a.out}  {dur:.2f}s  {len(placed)} of {len(events)} events placed')
     for k in BUSES:
@@ -201,8 +248,19 @@ def main():
           # > 6 dB of peak reduction (the old "peak above 2x the ceiling" rule) audibly flattens hits and can pump
           + ('   limiter working hard: lower gains' if took > 6 else ''))
     if unheard:
-        print('  not ear-tuned yet (ask the user to listen):')
-        for (ty, st), times in unheard.items(): print(f'    {ty:14s} [{st}] at {", ".join(times)}')
+        if a.audition: audition(unheard, table, apaths)
+        files = apaths if a.audition else {}
+        # the table starts at column 0 after a blank line, so it pastes into Markdown as a table, not a code block
+        print('  not ear-tuned yet (ask the user to listen)' + ('' if a.audition else
+              '; add --audition DIR to render each one and fill in the file column') + ':\n')
+        print('| sound | recipe | args | status | at | file to audition |\n| --- | --- | --- | --- | --- | --- |')
+        for key, r in unheard.items():
+            doc = re.split(r'[:.](\s|$)', ((table[key[0]].__doc__ or '').strip().splitlines() or [''])[0])[0]
+            times = sorted(r['at'], key=lambda x: float(x.split('s')[0]))
+            at = ', '.join(times[:4]) + (f' (+{len(times) - 4} more)' if len(times) > 4 else '')
+            args = ', '.join(f'{k}={v}' for k, v in r['args'].items()) or '—'
+            print('| ' + ' | '.join(cell(v) for v in (r['name'] or doc, key[0], args, r['status'], at, files.get(key, '—'))) + ' |')
+        print()
     elif tuned:
         print('  every placed recipe is ear-tuned')
 

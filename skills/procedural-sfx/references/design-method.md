@@ -68,7 +68,7 @@ Build and check one layer at a time: return just the attack, render it, then add
 | Verdict | Means | Do |
 | --- | --- | --- |
 | `CHECK: takes are identical` | Every take is the same sample for sample: the recipe draws no randomness | Add `uniform()` to pitch or timing, or `noise()` layers. Fine only for a UI tone that should repeat exactly (`ding`, `pop`, `beep`, `laser` are like this) |
-| `note: takes barely differ` | RMS range < 1 dB **and** centroid range < 2%: only fine noise detail changes (built-in `thump`, `heartbeat` and `creak` land here; `creak` does vary its pitch, which the centroid barely shows) | If it repeats within a second or so (steps, hits, typing), randomise pitch ±5–10% in the recipe, or vary args and gain per event |
+| `note: takes barely differ` | RMS range < 1 dB **and** centroid range < 2%: only fine noise detail changes (built-in `creak` lands here; it does vary its pitch, which the centroid barely shows). Or the most alike pair of takes has a waveform similarity above 0.98 (peak normalised cross-correlation within ±5 ms): the same waveform up to level, which the two spreads cannot see (built-in `thump` and `heartbeat`, whose sine body never changes) | If it repeats within a second or so (steps, hits, typing), randomise pitch ±5–10% in the recipe, or vary args and gain per event |
 | `takes vary` | Anything more | Nothing; listen if in doubt |
 
 ## 4. Rough metric targets

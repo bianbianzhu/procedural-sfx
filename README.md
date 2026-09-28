@@ -19,7 +19,7 @@ The CLI also writes a `skills-lock.json` in the project; commit it if you want t
 
 Or copy `skills/procedural-sfx/` into your agent's skills directory (for Claude Code: `~/.claude/skills/` or `.claude/skills/` in a project).
 
-Runtime dependencies: Python ≥ 3.9 with `numpy`, `scipy`, `soundfile` (`pip install -r skills/procedural-sfx/scripts/requirements.txt`). `ffmpeg` is optional, for loudness mastering and muxing.
+Runtime dependencies: Python ≥ 3.9 with `numpy`, `scipy`, `soundfile` (`pip install -r skills/procedural-sfx/scripts/requirements.txt`). `ffmpeg` ≥ 4.2 (with `ffprobe`) is optional, for loudness mastering and muxing.
 
 ## Layout
 

@@ -9,7 +9,9 @@
 # its dynamic mode (which its "linear" mode falls back to when the target is out of reach) compresses and can pump.
 # If that gain would push the true peak over the limit, nothing is written: the error names the loudest target that
 # fits (lower the loudest events and remix to get closer). Output: 24-bit PCM wav at the input's sample rate
-# (plays everywhere; the true-peak limit keeps samples under full scale, so fixed point cannot clip).
+# (plays everywhere; the true-peak limit keeps samples under full scale, so fixed point cannot clip). It is rendered
+# to a temp file next to the output, re-measured, and only then moved into place: a failed or interrupted run never
+# leaves a partial file, and the input can never be written to (same-file check covers symlinks and hard links).
 # mux.sh runs this first, so video and audio-only deliveries share the same linear-only policy.
 # Exit status: 0 = written and re-measured; 1 = input problem or unreachable target, explained as "error: ... / fix: ...".
 A="$1"; O="$2"; I="${3:--14}"; TP="${4:--1}"
@@ -21,19 +23,20 @@ command -v ffmpeg >/dev/null 2>&1 || err "ffmpeg is not on PATH" "install it (ma
 isnum() { printf '%s' "$1" | grep -Eq '^[+-]?[0-9]+([.][0-9]+)?$'; }
 [ -f "$A" ] || err "audio not found: $A" "check the path; mix.py writes to its -o path"
 [ -d "$(dirname "$O")" ] || err "output folder does not exist: $(dirname "$O")" "create it first"
-[ "$(cd "$(dirname "$A")" && pwd)/$(basename "$A")" != "$(cd "$(dirname "$O")" && pwd)/$(basename "$O")" ] \
-  || err "output would overwrite the input: $O" "write to a new file, e.g. master.wav"
-isnum "$I" && calc "exit !($I >= -40 && $I <= -5)" \
-  || err "target loudness must be a number of LUFS in [-40, -5], got '$I'" "e.g. -14 (web), -16 (podcast), -23 (EBU R128)"
+[ "$A" -ef "$O" ] && err "output is the input file (same file, maybe via a symlink or hard link): $O" \
+  "write to a new file, e.g. master.wav"
+isnum "$I" && calc "exit !($I >= -70 && $I <= 0)" \
+  || err "target loudness must be a number of LUFS in [-70, 0], got '$I'" "e.g. -14 (web), -16 (podcast), -23 (EBU R128)"
 isnum "$TP" && calc "exit !($TP >= -9 && $TP <= 0)" \
   || err "true-peak limit must be a number of dBTP in [-9, 0], got '$TP'" "e.g. -1 (most platforms) or -2 (ATSC broadcast)"
 
-LOG=$(mktemp); trap 'rm -f "$LOG"' EXIT
+LOG=$(mktemp); TMPO=""; trap 'rm -f "$LOG" ${TMPO:+"$TMPO"}' EXIT; trap 'exit 1' INT TERM HUP
 measure() {   # measure FILE -> sets MI (integrated LUFS) and MTP (true peak dBTP)
   ffmpeg -hide_banner -nostats -i "$1" -af ebur128=peak=true:framelog=verbose -f null - >"$LOG" 2>&1 \
     || err "ffmpeg could not read $1: $(grep -m1 -iE 'error|invalid' "$LOG")" "check that it is a valid audio file"
   MI=$(sed -n '/Summary:/,$ s/^ *I: *\([^ ]*\) LUFS.*/\1/p' "$LOG" | tail -1)
   MTP=$(sed -n '/Summary:/,$ s/^ *Peak: *\([^ ]*\) dBFS.*/\1/p' "$LOG" | tail -1)
+  LEN=$(grep -o 'time=[0-9:.]*' "$LOG" | tail -1)           # decoded length, to verify the render is complete
 }
 
 measure "$A"
@@ -41,15 +44,27 @@ measure "$A"
 isnum "$MI" && calc "exit !($MI > -70)" && isnum "$MTP" || err "loudness of $A could not be measured (got '$MI LUFS')" \
   "the mix is silent or shorter than ~0.4 s; check events and gains, or skip loudness mastering for a clip this short"
 GAIN=$(calc "printf \"%.2f\", $I - ($MI)")
-if calc "exit !($MTP + .05 + $GAIN > $TP)"; then   # +0.05: the meter prints one decimal
+if calc "exit !($MTP + .05 + $GAIN > $TP)"; then   # +0.05: the meter prints one decimal, so allow for its rounding
   # the loudest target that fits, rounded DOWN to 0.1 LU so passing it back is guaranteed to fit
   REACH=$(calc "v = ($MI + $TP - $MTP - .05) * 10; f = int(v); if (f > v) f -= 1; printf \"%.1f\", f / 10")
-  err "$A is at $MI LUFS with a true peak of $MTP dBTP; reaching $I LUFS needs $(calc "printf \"%+.2f\", $GAIN") dB of gain, which puts the true peak at $(calc "printf \"%+.2f\", $MTP + $GAIN") dBTP (limit $TP). The loudest target a clean gain change can reach is $REACH LUFS." \
+  WHY="$A is at $MI LUFS with a true peak of $MTP dBTP; reaching $I LUFS needs $(calc "printf \"%+.2f\", $GAIN") dB of gain, which puts the true peak at $(calc "printf \"%+.2f\", $MTP + $GAIN") dBTP"
+  if calc "exit !($MTP + $GAIN <= $TP)"; then   # only the rounding allowance tips it over: say so
+    WHY="$WHY, or up to $(calc "printf \"%+.2f\", $MTP + $GAIN + .05") dBTP since the meter prints one decimal (limit $TP, so it is checked against $(calc "printf \"%.2f\", $TP - .05"))."
+  else WHY="$WHY (limit $TP)."; fi
+  calc "exit !($REACH < -70)" && err "$WHY No target above -70 LUFS fits: the loudest peaks dwarf everything else." \
+    "lower the gain of the loudest events in events.json (or raise the quiet ones) and remix"
+  err "$WHY The loudest target a clean gain change can reach is $REACH LUFS." \
       "accept that quieter target by passing $REACH as the LUFS argument, or lower the gain of the loudest events in events.json (their peaks limit the whole mix) and remix"
 fi
+TMPO=$(mktemp "$(dirname "$O")/.master.XXXXXX") || err "cannot create a temp file in $(dirname "$O")" "check that the folder is writable"
 ffmpeg -y -loglevel error -i "$A" -af "volume=${GAIN}dB" -c:a pcm_s24le -map_metadata -1 -fflags +bitexact -flags:a +bitexact \
-  "$O" >"$LOG" 2>&1 || err "ffmpeg failed while writing $O: $(head -3 "$LOG" | tr '\n' ' ')" "check that the folder for $O is writable"
-IN_I=$MI; IN_TP=$MTP
-measure "$O"
+  -f wav "$TMPO" >"$LOG" 2>&1 || err "ffmpeg failed while writing $O: $(head -3 "$LOG" | tr '\n' ' ')" "check that the folder for $O is writable and has space"
+IN_I=$MI; IN_TP=$MTP; IN_LEN=$LEN
+measure "$TMPO"
+isnum "$MI" && isnum "$MTP" && calc "exit !($MTP <= $TP + .05)" && [ -n "$LEN" ] && [ "$LEN" = "$IN_LEN" ] \
+  || err "the rendered file did not verify (I '$MI' LUFS, true peak '$MTP' dBTP, ${LEN:-no length} vs $IN_LEN); $O was not written" "rerun; if it repeats, report it with the input file"
+chmod "$(printf '%o' $((0666 & ~0$(umask))))" "$TMPO"   # mktemp makes it 0600; give it normal permissions
+mv -f "$TMPO" "$O" || err "could not move the result into place: $O" "check permissions on $O"
+TMPO=""
 echo "$O"
 echo "  gain $(calc "printf \"%+.2f\", $GAIN") dB (linear only): $IN_I -> $MI LUFS (target $I), true peak $IN_TP -> $MTP dBTP (limit $TP)"

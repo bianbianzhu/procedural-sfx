@@ -33,8 +33,9 @@ def validate(E, table, path):
     events = E.get('events', E.get('ev'))
     if not isinstance(events, list): fail(f'{path}: missing "events" list', 'add "events": [ {"t": 1.0, "type": "click"} ]')
     dur = E.get('dur')
-    if dur is not None and (not isinstance(dur, (int, float)) or dur <= 0):
-        fail(f'{path}: "dur" must be a positive number of seconds, got {dur!r}')
+    if dur is not None and (not isinstance(dur, (int, float)) or isinstance(dur, bool) or n_(dur) < 1):
+        fail(f'{path}: "dur" must be a positive number of seconds (at least one sample, 1/{SR} s), got {dur!r}',
+             'set "dur" to the video length in seconds, e.g. "dur": 14.0')
     problems, unknown = [], {}
     for i, e in enumerate(events):
         at = f'events[{i}]'
@@ -114,12 +115,14 @@ def main():
     ap.add_argument('--bed', metavar='RECIPE', help='recipe rendered for the whole duration as a background bed')
     ap.add_argument('--bed-gain', type=float, default=.03)
     ap.add_argument('--duck-db', type=float, default=8.0, help='how far music dips under voice (dB)')
-    ap.add_argument('--ceiling', type=float, default=.95, help='limiter ceiling, 0 < c <= 1')
+    ap.add_argument('--ceiling', type=float, default=-1.0, help='true-peak limiter ceiling in dBTP, -6 .. 0 (default -1)')
     ap.add_argument('--stems', metavar='DIR', help='also write each bus as its own wav')
     ap.add_argument('--min-smr', type=float, default=0.0,
                     help='flag events whose best band is less than this many dB above everything else playing')
     a = ap.parse_args()
-    if not 0 < a.ceiling <= 1: fail(f'--ceiling must be in (0, 1], got {a.ceiling}')
+    if not -6 <= a.ceiling <= 0:
+        fail(f'--ceiling is a true-peak ceiling in dBTP and must be in [-6, 0], got {a.ceiling}',
+             'use -1 (web, streaming, most delivery specs) or -2 (US broadcast); a linear 0.95 is about -0.4 dBTP')
 
     base = os.path.dirname(os.path.abspath(a.events))
     table = recipes.load(a.recipes)
@@ -131,6 +134,7 @@ def main():
     bus = {k: np.zeros((N, 2)) for k in BUSES}
     vo_on = np.zeros(N)
     placed, seen = [], {}                          # placed: (label, t, stereo contribution) for the masking report
+    unheard, tuned = {}, 0                         # (recipe, status) -> event times, for sounds nobody has tuned by ear
 
     for i, e in enumerate(events):
         ty, t = e['type'], float(e['t'])
@@ -149,6 +153,9 @@ def main():
         s, contrib = place(bus[b], x, t, g, pan)
         if b == 'vo': vo_on[s:s + len(contrib)] = 1
         placed.append((label, max(t, 0.0), contrib * BUS_GAIN[b]))
+        if ty != 'file' and (st := recipes.status(table, ty, e.get('args', {}))) != 'tuned':
+            unheard.setdefault((ty, st), []).append(f'{max(t, 0.0):.2f}s')
+        elif ty != 'file': tuned += 1
 
     if a.music:
         m = read_wav(a.music if os.path.isabs(a.music) else os.path.join(base, a.music))
@@ -158,6 +165,8 @@ def main():
         reseed(1); has_d = a.bed in table and 'd' in inspect.signature(table[a.bed]).parameters
         x = recipes.call(table, a.bed, {'d': dur} if has_d else {}, '--bed')
         add(bus['bed'], np.resize(x, N), 0, a.bed_gain)
+        if (st := recipes.status(table, a.bed, {})) != 'tuned': unheard.setdefault((a.bed, st), []).append('0.00s (--bed)')
+        else: tuned += 1
 
     # duck music under voice: smooth the on/off mask over 0.25 s so the dip breathes in and out
     if vo_on.any():
@@ -168,8 +177,7 @@ def main():
     mix = sum(bus[k] * BUS_GAIN[k] for k in BUSES)
     if not np.isfinite(mix).all(): fail('mix contains NaN/inf', 'render each recipe alone with render_sfx.py to find the bad one')
     masked, unassessed = masking_report(placed, mix, a.min_smr)
-    raw_peak = np.abs(mix).max()
-    mix = limit(mix, a.ceiling)
+    mix, tp_in, tp_out = limit(mix, a.ceiling, report=True)
     write_wav(a.out, mix)
     if a.stems:
         for k in BUSES:
@@ -179,15 +187,24 @@ def main():
     for k in BUSES:
         if bus[k].any():
             act = np.abs(bus[k]).max(1) > 1e-4
-            print(f'  {k:6s} rms(active) {db(bus[k][act] * BUS_GAIN[k]):6.1f} dB   peak {np.abs(bus[k] * BUS_GAIN[k]).max():.2f}')
+            pk = np.abs(bus[k] * BUS_GAIN[k]).max()          # sample peak: cheap; the true peak is measured on the mix
+            print(f'  {k:6s} rms(active) {db(bus[k][act] * BUS_GAIN[k]):6.1f} dB   sample peak {20 * np.log10(pk):+5.1f} dBFS')
     ok = len(placed) - len(masked) - len(unassessed)
     print(f'  masking: {ok}/{len(placed)} events clear the rest of the mix in at least one band')
     for label, t, smr, band in masked:
         print(f'    CHECK {t:7.2f}s {label:14s} best band {band:4s} {smr:+5.1f} dB  -> raise gain, pan apart, or move it off louder sounds')
     for label, t in unassessed:
         print(f'    CHECK {t:7.2f}s {label:14s} not assessed (starts at the very end)')
-    print(f'  pre-limit peak {raw_peak:.2f} -> {np.abs(mix).max():.2f}'
-          + ('   (limiter working hard: lower gains)' if raw_peak > 2 * a.ceiling else ''))
+    took = tp_in - tp_out
+    print(f'  true peak {tp_in:+.1f} dBTP -> {tp_out:+.1f} dBTP (ceiling {a.ceiling:+.1f}; '
+          + (f'limiter took up to {took:.1f} dB off the loudest transients)' if took > .05 else 'limiter idle)')
+          # > 6 dB of peak reduction (the old "peak above 2x the ceiling" rule) audibly flattens hits and can pump
+          + ('   limiter working hard: lower gains' if took > 6 else ''))
+    if unheard:
+        print('  not ear-tuned yet (ask the user to listen):')
+        for (ty, st), times in unheard.items(): print(f'    {ty:14s} [{st}] at {", ".join(times)}')
+    elif tuned:
+        print('  every placed recipe is ear-tuned')
 
 
 if __name__ == '__main__':

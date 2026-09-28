@@ -1,7 +1,7 @@
 """Recipe library: each function returns a mono sound peak-normalised to v (default 1.0).
 
-Recipes are starting points. Copy one into your own recipes file and change the numbers
-(see references/design-method.md for which number changes what).
+Copy a recipe into your own recipes file and change the numbers (see references/design-method.md for which
+number changes what). STATUS records which recipes have been tuned by ear; status() reports it per event.
 """
 from sfxkit import *
 
@@ -94,7 +94,7 @@ def beep(v=1.0, f=2525, d=.25):
     return x * v
 
 
-# ============ weapons & sci-fi (starting points: tune by ear) ============
+# ============ weapons & sci-fi (status: starting point, tune by ear) ============
 _GUNS = {'pistol':  dict(crack=.0015, boom=.035, f=90, tail=.25),
          'rifle':   dict(crack=.0010, boom=.050, f=70, tail=.45),
          'shotgun': dict(crack=.0025, boom=.090, f=55, tail=.60)}
@@ -168,6 +168,45 @@ def heartbeat(v=1.0):
 RECIPES = {f.__name__: f for f in [click, clack, crash, thump, step, creak, whoosh, ding, pop, beep,
                                    gunshot, burst, explosion, laser, rumble, ignite, roar, heartbeat]}
 
+# ============ status: has anyone listened? ============
+# 'tuned' = ear-tuned in finished work; 'starting point' = measured and structurally sound, never ear-tuned;
+# 'new' = any recipe from a --recipes file (also one that wraps a built-in) unless it declares otherwise.
+# A status is a string, or a function of the recipe's args when it depends on them (step's surface).
+TUNED, STARTING, NEW = 'tuned', 'starting point', 'new'
+STATUSES = (TUNED, STARTING, NEW)
+
+
+def _step_status(surface='hard', **_):
+    """tuned for surface=hard; starting point for wood, soft"""
+    return TUNED if surface == 'hard' else STARTING
+
+
+STATUS = {**{name: TUNED for name in RECIPES}, 'gunshot': STARTING, 'burst': STARTING, 'explosion': STARTING,
+          'laser': STARTING, 'step': _step_status}
+
+
+def _declared(table, name):
+    """The status spec behind table[name]: the built-in table for untouched built-ins, else the function's own
+    `status` attribute (set in a --recipes file as `my_recipe.status = 'tuned'`), else 'new'."""
+    fn = table[name]
+    return STATUS[name] if fn is RECIPES.get(name) else fn.__dict__.get('status', NEW)
+
+
+def status(table, name, args=None):
+    """'tuned' | 'starting point' | 'new' for recipe `name` rendered with `args`."""
+    s = _declared(table, name)
+    if callable(s):
+        try: s = s(**(args or {}))
+        except TypeError as ex: fail(f'status function of {name} rejected args {args}: {ex}', 'give it a **_ catch-all parameter')
+    if s not in STATUSES: fail(f'{name} has status {s!r}', f'use one of {list(STATUSES)}')
+    return s
+
+
+def status_summary(table, name):
+    """One label for --list: the status, or the docstring of a status function (e.g. step's per-surface status)."""
+    s = _declared(table, name)
+    return ((s.__doc__ or '').strip() or 'depends on args') if callable(s) else s
+
 
 def call(table, name, args, where=''):
     """Render recipe `name` with `args`; turn every mistake into an actionable error (see sfxkit.fail)."""
@@ -210,5 +249,8 @@ def load(extra=()):
                  'fix that line; recipe files should start with `from sfxkit import *`')
         for name, fn in inspect.getmembers(mod, inspect.isfunction):
             if not name.startswith('_') and fn.__module__ == mod.__name__:
+                st = fn.__dict__.get('status', NEW)
+                if not callable(st) and st not in STATUSES:
+                    fail(f'{path}: {name}.status = {st!r}', f'use one of {list(STATUSES)}, or leave it unset (= {NEW!r})')
                 table[name] = fn
     return table

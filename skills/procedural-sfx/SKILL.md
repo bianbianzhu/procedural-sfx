@@ -1,6 +1,6 @@
 ---
 name: procedural-sfx
-description: Synthesize sound effects from code (numpy/scipy, no sample libraries), check them by numbers, and mix them frame-accurately under a video or animation with voice ducking, masking checks and loudness-normalised muxing. Use whenever someone needs sound effects or foley for a code-rendered video, animation, explainer, motion graphic or game prototype; wants to generate a specific sound from code (枪声, 爆炸, 脚步, 音效, 拟音, a laser, a door slam); needs SFX with no third-party sample licences; or needs audio synced to animation events, even if they never say "procedural". Not for composing music or finding recorded samples.
+description: Synthesize sound effects from code (numpy/scipy, no sample libraries), check them by numbers, and mix them frame-accurately under a video or animation with voice ducking and masking checks, then master it with a single linear gain to a loudness target for audio-only or video delivery. Use whenever someone needs sound effects or foley for a code-rendered video, animation, explainer, motion graphic or game prototype; wants to generate a specific sound from code (枪声, 爆炸, 脚步, 音效, 拟音, a laser, a door slam); needs SFX with no third-party sample licences; or needs audio synced to animation events, even if they never say "procedural". Not for composing music or finding recorded samples.
 ---
 
 # Procedural SFX
@@ -13,7 +13,7 @@ This works best for stylised work: animation, explainers, UI, motion graphics, g
 
 ```bash
 pip install -r scripts/requirements.txt   # numpy, scipy, soundfile
-python scripts/check_env.py               # verifies them; ffmpeg is optional (only for muxing)
+python scripts/check_env.py               # verifies them; ffmpeg is optional (only for master.sh / mux.sh)
 ```
 
 All scripts live in `scripts/` and run from anywhere. Paths below are relative to this skill's directory. On a mistake they exit 1 with `error: …` and a `fix: …` line; act on the fix line and rerun.
@@ -26,31 +26,34 @@ All scripts live in `scripts/` and run from anywhere. Paths below are relative t
    - Read `references/design-method.md` before writing a new recipe. It explains the attack/body/tail layering and which number changes what you hear.
    - Read `references/recipes.md` for what each built-in does, its parameters, and variations such as gun types, surfaces and distances.
 
-3. **Check each sound by numbers.** You cannot hear the output, so measure it: `python scripts/analyze.py sound.wav --bands`. Compare attack, ring time, spectral centroid and band balance against what the sound should be. `references/design-method.md` has rough targets. Also render several takes with `--variants 4` to confirm repeated sounds vary.
+3. **Check each sound by numbers.** You cannot hear the output, so measure it: `python scripts/analyze.py sound.wav --bands`. Compare attack, ring time, spectral centroid and band balance against what the sound should be. `references/design-method.md` has rough targets. For sounds that repeat, `render_sfx.py <recipe> --variants 4` prints metrics per take and flags takes that are identical or barely differ.
 
 4. **Write the event list.** `events.json` is one entry per sound with time, type, args, gain and pan. `assets/events.example.json` is a runnable example; voice lines and recorded audio go in as `"type": "file"` events. Take the times from the same constants that drive the animation rather than retyping them. See `references/event-sync.md` for the schema, exporting from different animation stacks, and anticipation offsets such as a whoosh that starts before its impact.
 
-5. **Mix.** Run `python scripts/mix.py events.json -o mix.wav [--recipes my_recipes.py] [--music score.wav] [--bed rumble] [--stems stems/]`. It validates the whole events file first, then prints levels per bus and a masking report that flags events buried under louder sounds. Fix every `CHECK` line. See `references/mixing.md` for gain staging, ducking and fixes for masking.
+5. **Mix.** Run `python scripts/mix.py events.json -o mix.wav [--recipes my_recipes.py] [--music score.wav] [--bed rumble] [--stems stems/]`. It validates the whole events file first, then prints levels per bus, a masking report that flags events buried under louder sounds, and the true peak before and after its limiter (ceiling −1 dBTP). Fix every `CHECK` line. See `references/mixing.md` for gain staging, ducking and fixes for masking.
 
-6. **Put it under the picture.** Run `sh scripts/mux.sh video.mp4 mix.wav out.mp4 [LUFS=-14] [dBTP=-1]`. This does two-pass loudness normalisation (−14 LUFS for web/social; other targets are in `references/mixing.md`) and prints the measured result.
+6. **Master for delivery.** Both scripts measure the mix, apply one linear gain to reach the loudness target (−14 LUFS for web/social; others in `references/mixing.md` §5) and print the re-measured result. They never compress; if the target would push the true peak over the limit they stop and name the loudest reachable target.
+   - With a video: `sh scripts/mux.sh video.mp4 mix.wav out.mp4 [LUFS=-14] [dBTP=-1]`.
+   - Audio only: `sh scripts/master.sh mix.wav final.wav [LUFS=-14] [dBTP=-1]`.
 
-7. **Hand off for listening.** Numbers catch broken sounds but not ugly ones. Tell the user which sounds are new or untuned, render them as separate wavs (`render_sfx.py --all dir/` or `--stems`), and ask them to listen. If something is off, `references/troubleshooting.md` maps complaints like "too thin", "clicks at the end" or "sounds robotic" to fixes, and has the final QA checklist.
+7. **Hand off for listening.** Numbers catch broken sounds but not ugly ones. The mix report ends with a "not ear-tuned yet" list: every placed sound whose recipe status is `starting point` or `new`. Render each of those on its own (`render_sfx.py [--recipes FILE] <recipe> <args> -o <file>.wav`, same args as in events.json) and hand off with a table, one row per sound: sound · recipe · status (`tuned` / `starting point` / `new`) · file to audition. Ask the user to listen to every row that isn't `tuned`. If something is off, `references/troubleshooting.md` maps complaints like "too thin", "clicks at the end" or "sounds robotic" to fixes, and has the final QA checklist.
 
 ## Scripts
 
 | Script | Purpose |
 | --- | --- |
-| `scripts/sfxkit.py` | Library: noise, envelopes, filters, sweeps, saturation, echo, radio FX, limiter, `add()` for placing sounds, wav I/O |
+| `scripts/sfxkit.py` | Library: noise, envelopes, filters, sweeps, saturation, echo, radio FX, true-peak meter and limiter, `add()` for placing sounds, wav I/O |
 | `scripts/recipes.py` | 18 built-in recipes + `load()` that merges your project recipe files |
 | `scripts/render_sfx.py` | Render one recipe, variants, or all recipes to wav for audition |
 | `scripts/analyze.py` | Metrics per file: peak, RMS, attack, ring time, spectral centroid, band energy |
 | `scripts/mix.py` | events.json → stereo mix with buses, ducking, limiter, stems, masking report |
-| `scripts/mux.sh` | Two-pass loudnorm + mux under a video (ffmpeg) |
+| `scripts/master.sh` | Audio-only delivery: measure, one linear gain to the LUFS target, true-peak check (ffmpeg) |
+| `scripts/mux.sh` | `master.sh`, then mux under a video as AAC (ffmpeg) |
 | `scripts/check_env.py` | Check dependencies |
 
 ## Built-in recipes
 
-Impacts: `click`, `clack`, `crash`, `thump`, `step` (hard/wood/soft), `creak` · Motion: `whoosh` · UI: `ding`, `pop`, `beep` · Weapons & sci-fi: `gunshot` (pistol/rifle/shotgun), `burst`, `explosion`, `laser` · Ambience & drama: `rumble`, `ignite`, `roar`, `heartbeat`. The weapons and sci-fi group are starting points that still need tuning by ear (see `references/recipes.md`).
+Impacts: `click`, `clack`, `crash`, `thump`, `step` (hard/wood/soft), `creak` · Motion: `whoosh` · UI: `ding`, `pop`, `beep` · Weapons & sci-fi: `gunshot` (pistol/rifle/shotgun), `burst`, `explosion`, `laser` · Ambience & drama: `rumble`, `ignite`, `roar`, `heartbeat`. Each has a status, shown by `render_sfx.py --list`: `tuned` (ear-tuned in finished work) or `starting point` (measured, never ear-tuned: `gunshot`, `burst`, `explosion`, `laser`, and `step` on wood/soft). Recipes from your own `--recipes` files are `new`. Details in `references/recipes.md`.
 
 ## Principles
 

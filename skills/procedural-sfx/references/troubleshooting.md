@@ -12,7 +12,7 @@
 | "Too thin / no weight" | No low body | Add a 40–90 Hz sine gliding down; lengthen body tau |
 | "Muddy / boomy" | Too much < 250 Hz, or low tails overlapping | High-pass supporting foley at 150–300 Hz; shorten low tails |
 | "Harsh / piercing" | Too much 2–5 kHz, or saturation drive too high | Lower the attack level; lower `sat` drive; low-pass at 8–10 kHz |
-| "Sounds fake / robotic" on repeats | Identical triggers | Randomise pitch ±5–10%, gain ±20%, pan ±0.2 per event |
+| "Sounds fake / robotic" on repeats | Identical triggers | Randomise pitch ±5–10%, gain ±20%, pan ±0.2 per event; confirm with `--variants 4` (`design-method.md` §3) |
 | "Sounds like a synth, not a thing" | Pure sines dominate | More noise in the attack, inharmonic partials, shorter taus |
 | "Clicks at the end" | Array cut while ringing | Longer array or shorter tail (`add()` already fades 5 ms, so a click means a hard cut *inside* the recipe, e.g. a mask like `(t > .01)`) |
 | "Click at the start" of a soft sound | Instant attack | `env_ad(d, .005, tau)` instead of `env_exp` |
@@ -33,9 +33,13 @@ The scripts exit 1 on input problems and print `error: <what and where>` followe
 | `error: … no recipe named 'X'` | Type typo, or `--recipes` missing | Follow the "did you mean" hint; `render_sfx.py --recipes file.py --list` shows what is registered |
 | `error: X (…): unknown argument(s)` | An `args` key the recipe doesn't take | The message lists the accepted arguments and their defaults |
 | Mix is slow | `compress()` is a per-sample Python loop | Use it on voice files only, once, and cache the result |
+| `error: --ceiling is a true-peak ceiling in dBTP` | An old linear value such as `--ceiling 0.95` | Pass dBTP: `-1` (default) or `-2` for US broadcast |
+| Sample peak looks safe but the file clips after encoding | Inter-sample (true) peaks: saturated noise bursts overshoot between samples | Trust the report's `true peak … dBTP`, not the sample peak; `mix.py` limits true peak |
 | `error: X produced NaN/inf` | Division by zero or `log(0)` in a recipe | Render it alone with `render_sfx.py` and fix the maths |
 | Recipe from a custom file not found | Function name starts with `_`, or is imported rather than defined there | Define it in that file; only its own public functions are registered |
-| Loudness after mux is off by ~0.5 LU | Single-pass loudnorm elsewhere in the chain | Use `mux.sh` (two-pass) and don't normalise twice |
+| Loudness after delivery is off by ~0.5 LU | `loudnorm` (single- or two-pass) elsewhere in the chain, or normalising twice | Master once with `master.sh` / `mux.sh`; they apply one linear gain measured with `ebur128` |
+| `error: output is the input file` / `output is one of the inputs` | The output path is the input, or a symlink or hard link to it | Write to a new file; the input is never touched |
+| `error: … the loudest target a clean gain change can reach is X LUFS` | The loudest events' true peaks leave too little room to raise the rest | Pass X as the LUFS argument, or lower the gains of the loudest events, remix, master again (`mixing.md` §5) |
 
 ## 3. Final QA checklist
 
@@ -43,9 +47,10 @@ Run through this before handing over:
 
 - [ ] `check_env.py` passes; every recipe used renders alone without error.
 - [ ] Each new or changed recipe has been through `analyze.py --bands` and sits near its row in `design-method.md` §4.
-- [ ] Repeated sounds were auditioned with `render_sfx.py … --variants 4` and vary.
-- [ ] `mix.py` report: no `warning`, no `CHECK` lines (or each one consciously accepted), pre-limit peak < 2 × ceiling.
+- [ ] Repeated sounds were checked with `render_sfx.py … --variants 4`: the verdict is `takes vary`, or the `CHECK` / `note` was consciously accepted.
+- [ ] `mix.py` report: no `warning`, no `CHECK` lines (or each one consciously accepted), no `limiter working hard`; the written true peak is at or under the ceiling.
 - [ ] `vo` is the loudest sustained bus when there is dialogue; the bed sits 25 dB or more below it.
-- [ ] `mux.sh` result is within ±1 LU of the target, and the true peak is under the limit.
+- [ ] `master.sh` / `mux.sh` printed a result within ±0.1 LU of the target (or you knowingly accepted the reachable one), with the true peak under the limit.
 - [ ] Stills at three or more event times show the matching visual moment.
-- [ ] The user has been given the new or ◇ sounds as separate wavs and asked to listen. State plainly which sounds nobody has heard yet.
+- [ ] Numbers re-measured after the last change (re-run `analyze.py` on changed recipes and `mix.py` on the final events); nothing above is from an older render.
+- [ ] The "not ear-tuned yet" list from the final `mix.py` report is handed to the user as a table (sound · recipe · status · file to audition), each file rendered on its own, with a plain request to listen to every `starting point` and `new` sound.

@@ -42,7 +42,11 @@ The scripts exit 1 on input problems and print `error: <what and where>` followe
 | `error: after AAC encoding the true peak is X dBTP, over the … limit` | The master sat within a few tenths of a dB of the limit and the codec added overs | Pass the LUFS value the error suggests (the same mix, quieter by the overshoot plus 0.5 dB of margin), or lower the loudest events and remix |
 | `warning: … has its own audio track; the output REPLACES it` | The video already carries music or dialogue | To keep it: extract it (`ffmpeg -i video.mp4 -vn -c:a pcm_s24le original.wav`), pass it to `mix.py --music`, remix, mux again. To replace it, ignore the warning |
 | `warning: the mix is Xs but the video is Ys` | `dur` in events.json is not the video length | Set `"dur"` to the video's duration; mux.sh pads or trims the audio to the video meanwhile |
-| `error: the output video does not match the source` | ffmpeg wrote fewer or more video packets than the source has | Rerun; if it repeats, report it with the video (nothing was written) |
+| `error: the output video does not match the source` | ffmpeg wrote fewer or more video packets than the source has | Should not happen; report it with the video and the ffmpeg version (nothing was written) |
+| `error: output must be .mp4, .m4v, .mov or .mkv` / `the … container cannot hold this video codec or AAC` | A container AAC can't go in (`.webm`), or a VP8/VP9 video into `.mp4` | `.mp4`/`.mov` for H.264/HEVC video, `.mkv` for anything else |
+| `error: the video is only Xs; loudness … needs at least 0.4 s` | A clip too short for BS.1770 loudness | Mux it yourself with the ffmpeg line the error prints (no loudness mastering) |
+| `error: this ffmpeg is too old` | ffmpeg before 4.2 (no `apad=whole_dur`) | Install ffmpeg 4.2 or newer |
+| `error: --audition DIR would overwrite the mix, a stem or an input` | `--audition` points at the folder holding the mix, stems or inputs, and a recipe name matches one of them | Give `--audition` its own folder, e.g. `--audition audition/` |
 | `error: after N renders (gain corrected each time) the result still measures …` | A very quiet target where loudness gating keeps shifting | Pick a target nearer the mix's own loudness |
 | `error: … the loudest target a clean gain change can reach is X LUFS` | The loudest events' true peaks leave too little room to raise the rest | Pass X as the LUFS argument, or lower the gains of the loudest events, remix, master again (`mixing.md` §5) |
 

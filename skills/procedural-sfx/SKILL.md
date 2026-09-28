@@ -13,7 +13,7 @@ This works best for stylised work: animation, explainers, UI, motion graphics, g
 
 ```bash
 pip install -r scripts/requirements.txt   # numpy, scipy, soundfile
-python scripts/check_env.py               # verifies them; ffmpeg is optional (only for master.sh / mux.sh)
+python scripts/check_env.py               # verifies them; ffmpeg >= 4.2 is optional (only for master.sh / mux.sh)
 ```
 
 All scripts live in `scripts/` and run from anywhere. Paths below are relative to this skill's directory. On a mistake they exit 1 with `error: …` and a `fix: …` line; act on the fix line and rerun.
@@ -33,7 +33,7 @@ All scripts live in `scripts/` and run from anywhere. Paths below are relative t
 5. **Mix.** Run `python scripts/mix.py events.json -o mix.wav [--recipes my_recipes.py] [--music score.wav] [--bed rumble] [--stems stems/] [--audition audition/]`. It validates the whole events file first, then prints levels per bus, a masking report that flags events buried under louder sounds, and the true peak before and after its limiter (ceiling −1 dBTP). Investigate every `CHECK` line: fix it, or accept it knowingly and say why. See `references/mixing.md` for gain staging, ducking and fixes for masking.
 
 6. **Master for delivery.** Both scripts measure the mix, apply one linear gain to reach the loudness target (−14 LUFS for web/social; others in `references/mixing.md` §5) and print the re-measured result. They never compress; if the target would push the true peak over the limit they stop and name the loudest reachable target.
-   - With a video: `sh scripts/mux.sh video.mp4 mix.wav out.mp4 [LUFS=-14] [dBTP=-1]`. The mix **replaces** the video's own audio. If the video already has music or dialogue that must stay, extract it (`ffmpeg -i video.mp4 -vn -c:a pcm_s24le original.wav`) and pass it to `mix.py --music original.wav` before muxing; `mux.sh` warns when the video has audio. Every video frame is kept and the audio is fitted to the video's length.
+   - With a video: `sh scripts/mux.sh video.mp4 mix.wav out.mp4 [LUFS=-14] [dBTP=-1]`. The mix **replaces** the video's own audio. If the video already has music or dialogue that must stay, extract it (`ffmpeg -i video.mp4 -vn -c:a pcm_s24le original.wav`) and pass it to `mix.py --music original.wav` before muxing; `mux.sh` warns when the video has audio. Every video frame is kept, and the mix is fitted to the video's length before it is mastered (set `"dur"` to the video length and nothing needs fitting). Output `.mp4`, `.m4v`, `.mov` or `.mkv`.
    - Audio only: `sh scripts/master.sh mix.wav final.wav [LUFS=-14] [dBTP=-1]`.
 
 7. **Hand off for listening.** Numbers catch broken sounds but not ugly ones. The mix report ends with a "not ear-tuned yet" table: every placed sound whose recipe status is `starting point` or `new`, one row per recipe and argument set. Run `mix.py` with `--audition DIR` and it renders each of those on its own (same args and take as in the mix) and fills in the file column; give events a `"name"` ("angry cat") and it fills in the sound column. Paste that table into the hand-off as it is: sound · recipe · args · status · times · file to audition. Ask the user to listen to every row that isn't `tuned`. If something is off, `references/troubleshooting.md` maps complaints like "too thin", "clicks at the end" or "sounds robotic" to fixes, and has the final QA checklist.

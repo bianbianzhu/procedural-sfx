@@ -51,4 +51,5 @@ Run through this before handing over:
 - [ ] `vo` is the loudest sustained bus when there is dialogue; the bed sits 25 dB or more below it.
 - [ ] `master.sh` / `mux.sh` printed a result within ±0.5 LU of the target (or you knowingly accepted the reachable one), with the true peak under the limit.
 - [ ] Stills at three or more event times show the matching visual moment.
-- [ ] The user has been given the new or ◇ sounds as separate wavs and asked to listen. State plainly which sounds nobody has heard yet.
+- [ ] Numbers re-measured after the last change (re-run `analyze.py` on changed recipes and `mix.py` on the final events); nothing above is from an older render.
+- [ ] The "not ear-tuned yet" list from the final `mix.py` report is handed to the user as a table (sound · recipe · status · file to audition), each file rendered on its own, with a plain request to listen to every `starting point` and `new` sound.

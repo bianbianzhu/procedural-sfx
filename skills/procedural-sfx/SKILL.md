@@ -36,7 +36,7 @@ All scripts live in `scripts/` and run from anywhere. Paths below are relative t
    - With a video: `sh scripts/mux.sh video.mp4 mix.wav out.mp4 [LUFS=-14] [dBTP=-1]`.
    - Audio only: `sh scripts/master.sh mix.wav final.wav [LUFS=-14] [dBTP=-1]`.
 
-7. **Hand off for listening.** Numbers catch broken sounds but not ugly ones. Tell the user which sounds are new or untuned, render them as separate wavs (`render_sfx.py --all dir/` or `--stems`), and ask them to listen. If something is off, `references/troubleshooting.md` maps complaints like "too thin", "clicks at the end" or "sounds robotic" to fixes, and has the final QA checklist.
+7. **Hand off for listening.** Numbers catch broken sounds but not ugly ones. The mix report ends with a "not ear-tuned yet" list: every placed sound whose recipe status is `starting point` or `new`. Render each of those on its own (`render_sfx.py <recipe> <args> -o <file>.wav`, same args as in events.json) and hand off with a table, one row per sound: sound · recipe · status (`tuned` / `starting point` / `new`) · file to audition. Ask the user to listen to every row that isn't `tuned`. If something is off, `references/troubleshooting.md` maps complaints like "too thin", "clicks at the end" or "sounds robotic" to fixes, and has the final QA checklist.
 
 ## Scripts
 
@@ -53,7 +53,7 @@ All scripts live in `scripts/` and run from anywhere. Paths below are relative t
 
 ## Built-in recipes
 
-Impacts: `click`, `clack`, `crash`, `thump`, `step` (hard/wood/soft), `creak` · Motion: `whoosh` · UI: `ding`, `pop`, `beep` · Weapons & sci-fi: `gunshot` (pistol/rifle/shotgun), `burst`, `explosion`, `laser` · Ambience & drama: `rumble`, `ignite`, `roar`, `heartbeat`. The weapons and sci-fi group are starting points that still need tuning by ear (see `references/recipes.md`).
+Impacts: `click`, `clack`, `crash`, `thump`, `step` (hard/wood/soft), `creak` · Motion: `whoosh` · UI: `ding`, `pop`, `beep` · Weapons & sci-fi: `gunshot` (pistol/rifle/shotgun), `burst`, `explosion`, `laser` · Ambience & drama: `rumble`, `ignite`, `roar`, `heartbeat`. Each has a status, shown by `render_sfx.py --list`: `tuned` (ear-tuned in finished work) or `starting point` (measured, never ear-tuned: `gunshot`, `burst`, `explosion`, `laser`, and `step` on wood/soft). Recipes from your own `--recipes` files are `new`. Details in `references/recipes.md`.
 
 ## Principles
 

@@ -9,6 +9,8 @@ Rules that keep recipes composable:
   - take v=1.0 plus keyword arguments with sensible defaults (events pass them via "args")
   - get randomness only from noise() / rand() / uniform(), so mix.py can seed each event
   - write the docstring's first line as "what it sounds like: how it is built"
+  - status: recipes from this file count as 'new' (not ear-tuned) in --list and in mix.py's "not ear-tuned yet"
+    list. Once the user has listened and approved one, mark it: `door_slam.status = 'tuned'` after the def.
 """
 import os, sys
 # mix.py and render_sfx.py already put the skill's scripts/ on the path. To import this file on its own,
@@ -27,3 +29,5 @@ def door_slam(v=1.0, room=True):
     x = latch * .7 + body + rattle * .5
     if room: x = echo(x, delay=.045, feedback=.3, taps=3, damp=2500)               # tail: small hallway
     return norm(x) * v
+
+# door_slam.status = 'tuned'    # uncomment only after the user has listened and approved it

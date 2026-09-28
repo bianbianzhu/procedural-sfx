@@ -133,6 +133,7 @@ def main():
     bus = {k: np.zeros((N, 2)) for k in BUSES}
     vo_on = np.zeros(N)
     placed, seen = [], {}                          # placed: (label, t, stereo contribution) for the masking report
+    unheard = {}                                   # (recipe, status) -> event times, for sounds nobody has tuned by ear
 
     for i, e in enumerate(events):
         ty, t = e['type'], float(e['t'])
@@ -151,6 +152,8 @@ def main():
         s, contrib = place(bus[b], x, t, g, pan)
         if b == 'vo': vo_on[s:s + len(contrib)] = 1
         placed.append((label, max(t, 0.0), contrib * BUS_GAIN[b]))
+        if ty != 'file' and (st := recipes.status(table, ty, e.get('args', {}))) != 'tuned':
+            unheard.setdefault((ty, st), []).append(f'{t:.2f}s')
 
     if a.music:
         m = read_wav(a.music if os.path.isabs(a.music) else os.path.join(base, a.music))
@@ -160,6 +163,7 @@ def main():
         reseed(1); has_d = a.bed in table and 'd' in inspect.signature(table[a.bed]).parameters
         x = recipes.call(table, a.bed, {'d': dur} if has_d else {}, '--bed')
         add(bus['bed'], np.resize(x, N), 0, a.bed_gain)
+        if (st := recipes.status(table, a.bed, {})) != 'tuned': unheard.setdefault((a.bed, st), []).append('0.00s (--bed)')
 
     # duck music under voice: smooth the on/off mask over 0.25 s so the dip breathes in and out
     if vo_on.any():
@@ -194,6 +198,11 @@ def main():
           + (f'limiter took up to {took:.1f} dB off the loudest transients)' if took > .05 else 'limiter idle)')
           # > 6 dB of peak reduction (the old "peak above 2x the ceiling" rule) audibly flattens hits and can pump
           + ('   limiter working hard: lower gains' if took > 6 else ''))
+    if unheard:
+        print('  not ear-tuned yet (ask the user to listen):')
+        for (ty, st), times in unheard.items(): print(f'    {ty:14s} [{st}] at {", ".join(times)}')
+    else:
+        print('  every placed recipe is ear-tuned')
 
 
 if __name__ == '__main__':

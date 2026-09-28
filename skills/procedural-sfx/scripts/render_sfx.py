@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render recipes to wav files for auditioning and analysis.
 
-  python render_sfx.py --list                               # every recipe with its one-line description
+  python render_sfx.py --list                               # every recipe: one-line description [status]
   python render_sfx.py gunshot kind=rifle -o gun.wav        # one sound, keyword args as key=value
   python render_sfx.py --all out_dir/                       # every recipe at default settings
   python render_sfx.py --recipes my_recipes.py door_slam -o door.wav
@@ -34,8 +34,10 @@ def main():
     table = recipes.load(a.recipes)
 
     if a.list:
+        # status: tuned = ear-tuned in finished work; starting point = never ear-tuned; new = from a --recipes file
         for name, fn in table.items():
-            print(f'{name:12s} {(fn.__doc__ or "").strip().splitlines()[0] if fn.__doc__ else ""}')
+            doc = (fn.__doc__ or '').strip().splitlines()[0] if (fn.__doc__ or '').strip() else ''
+            print(f'{name:12s} {doc}  [{recipes.status_summary(table, name)}]')
         return
     if a.all:
         for i, name in enumerate(table):

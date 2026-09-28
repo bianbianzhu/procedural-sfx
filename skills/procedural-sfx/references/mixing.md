@@ -42,12 +42,18 @@ mix.wav  14.00s  8 of 8 events placed
   sfx    rms(active)  -14.1 dB   true peak  +2.2 dBTP
   masking: 8/8 events clear the rest of the mix in at least one band
   true peak +2.2 dBTP -> -1.0 dBTP (ceiling -1.0; limiter took up to 3.2 dB off the loudest transients)
+  not ear-tuned yet (ask the user to listen):
+    gunshot        [starting point] at 4.60s
+    burst          [starting point] at 6.00s
+    step           [starting point] at 9.00s, 9.45s
+    explosion      [starting point] at 11.50s
 ```
 
 - **N of M events placed**: events starting after `dur` or ending before 0 are skipped with a warning.
 - **rms(active)** is loudness while the bus is actually sounding. In dialogue-driven pieces, keep `vo` the loudest of `vo`, `music` and the steady parts of `sfx`. Short hero hits may exceed it.
 - **masking** gives, for each event, its best signal-to-masker ratio across both channels and three bands (low/mid/high) in its most exposed 30 ms frame within its first 0.3 s. It is compared against everything else playing at that moment, so panning apart counts. Below `--min-smr` (default 0 dB) gets a `CHECK` line. Its limits: it only looks at the first 0.3 s (a tail buried later is not checked), and one exposed band in one frame is enough to pass. So no `CHECK` means "probably not lost", not "clearly audible"; a sound that matters to the story still needs a listen.
 - **true peak** before and after the limiter, in dBTP. "Limiter took up to X dB" is how far the loudest transient was pulled down. Above 6 dB the report adds `limiter working hard: lower gains`: that much peak reduction audibly flattens hits and can pump, so lower the gains of the loudest events instead of relying on it. A few dB on the odd gunshot crack is normal.
+- **not ear-tuned yet** lists every placed recipe event (and the `--bed`) whose status is `starting point` or `new`, grouped by recipe and status with its times; `file` events are not listed. These are the sounds nobody has approved by ear: hand them to the user (SKILL.md step 7). When there are none it says `every placed recipe is ear-tuned`.
 
 ## 4. Fixing masking
 

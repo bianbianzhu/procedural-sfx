@@ -26,7 +26,7 @@ All scripts live in `scripts/` and run from anywhere. Paths below are relative t
    - Read `references/design-method.md` before writing a new recipe. It explains the attack/body/tail layering and which number changes what you hear.
    - Read `references/recipes.md` for what each built-in does, its parameters, and variations such as gun types, surfaces and distances.
 
-3. **Check each sound by numbers.** You cannot hear the output, so measure it: `python scripts/analyze.py sound.wav --bands`. Compare attack, ring time, spectral centroid and band balance against what the sound should be. `references/design-method.md` has rough targets. Also render several takes with `--variants 4` to confirm repeated sounds vary.
+3. **Check each sound by numbers.** You cannot hear the output, so measure it: `python scripts/analyze.py sound.wav --bands`. Compare attack, ring time, spectral centroid and band balance against what the sound should be. `references/design-method.md` has rough targets. For sounds that repeat, `render_sfx.py <recipe> --variants 4` prints metrics per take and flags takes that are identical or barely differ.
 
 4. **Write the event list.** `events.json` is one entry per sound with time, type, args, gain and pan. `assets/events.example.json` is a runnable example; voice lines and recorded audio go in as `"type": "file"` events. Take the times from the same constants that drive the animation rather than retyping them. See `references/event-sync.md` for the schema, exporting from different animation stacks, and anticipation offsets such as a whoosh that starts before its impact.
 

@@ -63,6 +63,14 @@ Build and check one layer at a time: return just the attack, render it, then add
 | More motion | Sweep a band-pass centre (`whoosh`), pan from −1 → 1 across the event |
 | Less synthetic on repeats | Randomise pitch ±5–10%, level ±20%, pan ±0.2 per trigger; `uniform()` inside the recipe |
 
+**Checking variation by numbers.** `render_sfx.py <recipe> --variants 4` writes the takes back to back and prints `analyze.py` metrics per take (peak, RMS, centroid, t-20) plus their spread, with a verdict:
+
+| Verdict | Means | Do |
+| --- | --- | --- |
+| `CHECK: takes are identical` | Every take is the same sample for sample: the recipe draws no randomness | Add `uniform()` to pitch or timing, or `noise()` layers. Fine only for a UI tone that should repeat exactly (`ding`, `pop`, `beep`, `laser` are like this) |
+| `note: takes barely differ` | RMS range < 1 dB **and** centroid range < 2%: only fine noise detail changes (built-in `thump`, `heartbeat` and `creak` land here; `creak` does vary its pitch, which the centroid barely shows) | If it repeats within a second or so (steps, hits, typing), randomise pitch ±5–10% in the recipe, or vary args and gain per event |
+| `takes vary` | Anything more | Nothing; listen if in doubt |
+
 ## 4. Rough metric targets
 
 These are heuristics for catching mistakes, not rules. Compare `analyze.py --bands` output against them. Every built-in recipe rendered at its defaults (`render_sfx.py --all DIR`) falls inside its row; the last column names them. The band names are the ones `--bands` prints: sub < 60 Hz, low 60–250, lowmid 250–1k, mid 1–4k, high 4–10k, air > 10k.

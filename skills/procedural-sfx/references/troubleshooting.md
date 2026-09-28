@@ -12,7 +12,7 @@
 | "Too thin / no weight" | No low body | Add a 40–90 Hz sine gliding down; lengthen body tau |
 | "Muddy / boomy" | Too much < 250 Hz, or low tails overlapping | High-pass supporting foley at 150–300 Hz; shorten low tails |
 | "Harsh / piercing" | Too much 2–5 kHz, or saturation drive too high | Lower the attack level; lower `sat` drive; low-pass at 8–10 kHz |
-| "Sounds fake / robotic" on repeats | Identical triggers | Randomise pitch ±5–10%, gain ±20%, pan ±0.2 per event |
+| "Sounds fake / robotic" on repeats | Identical triggers | Randomise pitch ±5–10%, gain ±20%, pan ±0.2 per event; confirm with `--variants 4` (`design-method.md` §3) |
 | "Sounds like a synth, not a thing" | Pure sines dominate | More noise in the attack, inharmonic partials, shorter taus |
 | "Clicks at the end" | Array cut while ringing | Longer array or shorter tail (`add()` already fades 5 ms, so a click means a hard cut *inside* the recipe, e.g. a mask like `(t > .01)`) |
 | "Click at the start" of a soft sound | Instant attack | `env_ad(d, .005, tau)` instead of `env_exp` |
@@ -46,7 +46,7 @@ Run through this before handing over:
 
 - [ ] `check_env.py` passes; every recipe used renders alone without error.
 - [ ] Each new or changed recipe has been through `analyze.py --bands` and sits near its row in `design-method.md` §4.
-- [ ] Repeated sounds were auditioned with `render_sfx.py … --variants 4` and vary.
+- [ ] Repeated sounds were checked with `render_sfx.py … --variants 4`: the verdict is `takes vary`, or the `CHECK` / `note` was consciously accepted.
 - [ ] `mix.py` report: no `warning`, no `CHECK` lines (or each one consciously accepted), no `limiter working hard`; the written true peak is at or under the ceiling.
 - [ ] `vo` is the loudest sustained bus when there is dialogue; the bed sits 25 dB or more below it.
 - [ ] `master.sh` / `mux.sh` printed a result within ±0.5 LU of the target (or you knowingly accepted the reachable one), with the true peak under the limit.

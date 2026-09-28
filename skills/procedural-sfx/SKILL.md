@@ -13,7 +13,7 @@ This works best for stylised work: animation, explainers, UI, motion graphics, g
 
 ```bash
 pip install -r scripts/requirements.txt   # numpy, scipy, soundfile
-python scripts/check_env.py               # verifies them; ffmpeg is optional (only for muxing)
+python scripts/check_env.py               # verifies them; ffmpeg is optional (only for master.sh / mux.sh)
 ```
 
 All scripts live in `scripts/` and run from anywhere. Paths below are relative to this skill's directory. On a mistake they exit 1 with `error: …` and a `fix: …` line; act on the fix line and rerun.
@@ -32,7 +32,9 @@ All scripts live in `scripts/` and run from anywhere. Paths below are relative t
 
 5. **Mix.** Run `python scripts/mix.py events.json -o mix.wav [--recipes my_recipes.py] [--music score.wav] [--bed rumble] [--stems stems/]`. It validates the whole events file first, then prints levels per bus and a masking report that flags events buried under louder sounds. Fix every `CHECK` line. See `references/mixing.md` for gain staging, ducking and fixes for masking.
 
-6. **Put it under the picture.** Run `sh scripts/mux.sh video.mp4 mix.wav out.mp4 [LUFS=-14] [dBTP=-1]`. This does two-pass loudness normalisation (−14 LUFS for web/social; other targets are in `references/mixing.md`) and prints the measured result.
+6. **Master for delivery.** Both scripts measure the mix, apply one linear gain to reach the loudness target (−14 LUFS for web/social; others in `references/mixing.md` §5) and print the re-measured result. They never compress; if the target would push the true peak over the limit they stop and name the loudest reachable target.
+   - With a video: `sh scripts/mux.sh video.mp4 mix.wav out.mp4 [LUFS=-14] [dBTP=-1]`.
+   - Audio only: `sh scripts/master.sh mix.wav final.wav [LUFS=-14] [dBTP=-1]`.
 
 7. **Hand off for listening.** Numbers catch broken sounds but not ugly ones. Tell the user which sounds are new or untuned, render them as separate wavs (`render_sfx.py --all dir/` or `--stems`), and ask them to listen. If something is off, `references/troubleshooting.md` maps complaints like "too thin", "clicks at the end" or "sounds robotic" to fixes, and has the final QA checklist.
 
@@ -45,7 +47,8 @@ All scripts live in `scripts/` and run from anywhere. Paths below are relative t
 | `scripts/render_sfx.py` | Render one recipe, variants, or all recipes to wav for audition |
 | `scripts/analyze.py` | Metrics per file: peak, RMS, attack, ring time, spectral centroid, band energy |
 | `scripts/mix.py` | events.json → stereo mix with buses, ducking, limiter, stems, masking report |
-| `scripts/mux.sh` | Two-pass loudnorm + mux under a video (ffmpeg) |
+| `scripts/master.sh` | Audio-only delivery: measure, one linear gain to the LUFS target, true-peak check (ffmpeg) |
+| `scripts/mux.sh` | `master.sh`, then mux under a video as AAC (ffmpeg) |
 | `scripts/check_env.py` | Check dependencies |
 
 ## Built-in recipes

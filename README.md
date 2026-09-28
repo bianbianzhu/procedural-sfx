@@ -5,7 +5,7 @@ An agent skill for making sound effects from code (numpy + scipy, no sample libr
 - 18 built-in recipes: impacts, footsteps, whooshes, UI sounds, gunshots, explosions, sci-fi, ambience beds
 - Event-driven mixer: `events.json` → stereo mix with voice ducking, limiter, stems, and a per-event masking report
 - Analysis tools so an agent that cannot listen can still check its sounds by numbers
-- Two-pass loudness normalisation and muxing with ffmpeg
+- Loudness mastering by a single linear gain with a true-peak check, for audio-only delivery or muxed under a video (ffmpeg)
 
 ## Install
 
@@ -19,14 +19,14 @@ The CLI also writes a `skills-lock.json` in the project; commit it if you want t
 
 Or copy `skills/procedural-sfx/` into your agent's skills directory (for Claude Code: `~/.claude/skills/` or `.claude/skills/` in a project).
 
-Runtime dependencies: Python ≥ 3.9 with `numpy`, `scipy`, `soundfile` (`pip install -r skills/procedural-sfx/scripts/requirements.txt`). `ffmpeg` is optional, for muxing and loudness normalisation.
+Runtime dependencies: Python ≥ 3.9 with `numpy`, `scipy`, `soundfile` (`pip install -r skills/procedural-sfx/scripts/requirements.txt`). `ffmpeg` is optional, for loudness mastering and muxing.
 
 ## Layout
 
 ```
 skills/procedural-sfx/
 ├── SKILL.md        entry point: when to use, workflow, script index
-├── scripts/        runnable tools (synthesis library, recipes, render, analyze, mix, mux)
+├── scripts/        runnable tools (synthesis library, recipes, render, analyze, mix, master, mux)
 ├── references/     loaded on demand: sound design, recipe catalog, sync, mixing, troubleshooting
 ├── assets/         example events file and a custom-recipe template
 └── agents/         openai.yaml: display name and short description for Codex's skill UI

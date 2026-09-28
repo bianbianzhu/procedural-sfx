@@ -11,5 +11,5 @@ for mod in ('numpy', 'scipy', 'soundfile'):
     except ImportError:
         print(f'{mod:10s} MISSING   -> pip install -r requirements.txt'); ok = False
 ff = shutil.which('ffmpeg')
-print(f'ffmpeg     {ff or "missing (optional: only needed for mux.sh / loudness)"}')
+print(f'ffmpeg     {ff or "missing (optional: only needed for master.sh / mux.sh)"}')
 sys.exit(0 if ok else 1)

@@ -5,7 +5,7 @@
 2. Gain staging
 3. Reading the mix report
 4. Fixing masking
-5. Loudness targets and muxing
+5. Loudness targets, mastering and muxing
 6. Hybrid mixes with recorded audio
 
 ## 1. Bus layout and what mix.py does
@@ -59,9 +59,12 @@ A `CHECK` line means that sound will probably not be heard. In order of preferen
 4. **Raise its gain.** This is the last resort, because it makes everything else relatively quieter.
 5. **Cut it.** If it doesn't matter to the story, cut it. Fewer, clearer sounds read better than many buried ones.
 
-## 5. Loudness targets and muxing
+## 5. Loudness targets, mastering and muxing
 
-`sh scripts/mux.sh video.mp4 mix.wav out.mp4 [LUFS] [dBTP]` measures in a first pass, then normalises in a second (lands within about ±0.5 LU of the target; a single pass drifts further). It refuses silent or sub-0.4 s audio with an explanation, since loudness can't be measured there. It copies the video stream, encodes AAC 256k, and prints the measured integrated loudness and peak of the result.
+| Delivery | Command |
+| --- | --- |
+| Audio only | `sh scripts/master.sh mix.wav final.wav [LUFS=-14] [dBTP=-1]` |
+| Under a video | `sh scripts/mux.sh video.mp4 mix.wav out.mp4 [LUFS=-14] [dBTP=-1]` |
 
 | Destination | Integrated | True peak |
 | --- | --- | --- |
@@ -70,7 +73,11 @@ A `CHECK` line means that sound will probably not be heard. In order of preferen
 | EU broadcast (EBU R128) | −23 LUFS | −1 dBTP |
 | US broadcast (ATSC A/85) | −24 LKFS | −2 dBTP |
 
-Don't normalise the mix itself. Leave it at its natural level (the limiter keeps it safe) and normalise once at delivery.
+**Linear gain only.** `master.sh` measures integrated loudness and true peak (ffmpeg `ebur128`, the BS.1770 meter), computes `gain = target − measured`, and applies exactly that with ffmpeg's `volume` filter. Nothing else touches the audio, so the dynamics you mixed are the dynamics that ship. ffmpeg's `loudnorm` is not used: when a target is out of reach its "linear" mode silently switches to dynamic processing, which compresses and can pump, and its own first-pass measurement read sparse SFX mixes about 0.6 LU loud. `master.sh` writes 24-bit PCM wav at the mix's sample rate: it plays everywhere, and with the true peak under the limit nothing can clip in fixed point. It re-measures the result and prints it (lands within ±0.1 LU of the target). `mux.sh` runs `master.sh` first, then copies the video stream and encodes the audio as AAC 256k. AAC can add a few tenths of a dB of overs, which the −1 dBTP default leaves room for; the re-measured "after AAC" line shows the result.
+
+**When the target is out of reach.** If the gain would put the true peak over the limit, nothing is written and the error names the loudest target that fits, e.g. `the loudest target a clean gain change can reach is -12.7 LUFS`. Either accept it (pass it as the LUFS argument; being a dB or two under a platform target just plays a little quieter there) or make the mix denser: lower the gain of the few loudest events (usually gunshots, explosions, hard impacts) in events.json, remix, and master again. Their peaks cap the whole mix, so taking 3 dB off them buys up to 3 dB of loudness for everything else. Both scripts also refuse silent or sub-0.4 s audio with an explanation, since loudness can't be measured there.
+
+Don't normalise the mix itself. Leave it at its natural level (the limiter keeps its true peak under the ceiling) and master once at delivery.
 
 ## 6. Hybrid mixes with recorded audio
 

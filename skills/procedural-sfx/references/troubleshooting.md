@@ -37,7 +37,8 @@ The scripts exit 1 on input problems and print `error: <what and where>` followe
 | Sample peak looks safe but the file clips after encoding | Inter-sample (true) peaks: saturated noise bursts overshoot between samples | Trust the report's `true peak … dBTP`, not the sample peak; `mix.py` limits true peak |
 | `error: X produced NaN/inf` | Division by zero or `log(0)` in a recipe | Render it alone with `render_sfx.py` and fix the maths |
 | Recipe from a custom file not found | Function name starts with `_`, or is imported rather than defined there | Define it in that file; only its own public functions are registered |
-| Loudness after mux is off by ~0.5 LU | Single-pass loudnorm elsewhere in the chain | Use `mux.sh` (two-pass) and don't normalise twice |
+| Loudness after delivery is off by ~0.5 LU | `loudnorm` (single- or two-pass) elsewhere in the chain, or normalising twice | Master once with `master.sh` / `mux.sh`; they apply one linear gain measured with `ebur128` |
+| `error: … the loudest target a clean gain change can reach is X LUFS` | The loudest events' true peaks leave too little room to raise the rest | Pass X as the LUFS argument, or lower the gains of the loudest events, remix, master again (`mixing.md` §5) |
 
 ## 3. Final QA checklist
 
@@ -48,6 +49,6 @@ Run through this before handing over:
 - [ ] Repeated sounds were auditioned with `render_sfx.py … --variants 4` and vary.
 - [ ] `mix.py` report: no `warning`, no `CHECK` lines (or each one consciously accepted), no `limiter working hard`; the written true peak is at or under the ceiling.
 - [ ] `vo` is the loudest sustained bus when there is dialogue; the bed sits 25 dB or more below it.
-- [ ] `mux.sh` result is within ±1 LU of the target, and the true peak is under the limit.
+- [ ] `master.sh` / `mux.sh` printed a result within ±0.5 LU of the target (or you knowingly accepted the reachable one), with the true peak under the limit.
 - [ ] Stills at three or more event times show the matching visual moment.
 - [ ] The user has been given the new or ◇ sounds as separate wavs and asked to listen. State plainly which sounds nobody has heard yet.

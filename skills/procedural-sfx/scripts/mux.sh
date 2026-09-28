@@ -61,7 +61,7 @@ ffmpeg -hide_banner -h filter=apad 2>/dev/null | grep -q whole_dur \
 # a private folder next to the output (same filesystem, so the final mv is atomic; mktemp makes it 0700 with an
 # unpredictable name, so nothing can be planted at the paths written inside it)
 TMP=$(mktemp -d "$(dirname "$O")/.mux.XXXXXX") || err "cannot create a temp folder in $(dirname "$O")" "check that the folder is writable"
-PART="$TMP/$(basename "$O")"; FIT="$TMP/$(basename "$A")"
+PART="$TMP/$(basename "$O")"; FIT="$TMP/fitted.wav"
 trap 'rm -rf "$TMP"' EXIT; trap 'exit 1' INT TERM HUP
 # fit the mix to the video FIRST, so the loudness target applies to exactly the audio that ships (32-bit float keeps
 # it lossless); then master that

@@ -11,7 +11,7 @@ Exit status: 0 = mix written; 1 = input problem, explained on stderr as "error: 
 """
 import argparse, json, os, sys, zlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from sfxkit import SR, np, reseed, add, limit, true_peak_db, read_wav, write_wav, db, n_, fail
+from sfxkit import SR, np, reseed, add, limit, read_wav, write_wav, db, n_, fail
 import recipes
 
 BUSES = ('sfx', 'vo', 'music', 'bed')
@@ -33,8 +33,9 @@ def validate(E, table, path):
     events = E.get('events', E.get('ev'))
     if not isinstance(events, list): fail(f'{path}: missing "events" list', 'add "events": [ {"t": 1.0, "type": "click"} ]')
     dur = E.get('dur')
-    if dur is not None and (not isinstance(dur, (int, float)) or dur <= 0):
-        fail(f'{path}: "dur" must be a positive number of seconds, got {dur!r}')
+    if dur is not None and (not isinstance(dur, (int, float)) or isinstance(dur, bool) or n_(dur) < 1):
+        fail(f'{path}: "dur" must be a positive number of seconds (at least one sample, 1/{SR} s), got {dur!r}',
+             'set "dur" to the video length in seconds, e.g. "dur": 14.0')
     problems, unknown = [], {}
     for i, e in enumerate(events):
         at = f'events[{i}]'
@@ -153,7 +154,7 @@ def main():
         if b == 'vo': vo_on[s:s + len(contrib)] = 1
         placed.append((label, max(t, 0.0), contrib * BUS_GAIN[b]))
         if ty != 'file' and (st := recipes.status(table, ty, e.get('args', {}))) != 'tuned':
-            unheard.setdefault((ty, st), []).append(f'{t:.2f}s')
+            unheard.setdefault((ty, st), []).append(f'{max(t, 0.0):.2f}s')
         elif ty != 'file': tuned += 1
 
     if a.music:
@@ -176,9 +177,7 @@ def main():
     mix = sum(bus[k] * BUS_GAIN[k] for k in BUSES)
     if not np.isfinite(mix).all(): fail('mix contains NaN/inf', 'render each recipe alone with render_sfx.py to find the bad one')
     masked, unassessed = masking_report(placed, mix, a.min_smr)
-    tp_in = true_peak_db(mix)
-    mix = limit(mix, a.ceiling)
-    tp_out = true_peak_db(mix)
+    mix, tp_in, tp_out = limit(mix, a.ceiling, report=True)
     write_wav(a.out, mix)
     if a.stems:
         for k in BUSES:
@@ -188,7 +187,8 @@ def main():
     for k in BUSES:
         if bus[k].any():
             act = np.abs(bus[k]).max(1) > 1e-4
-            print(f'  {k:6s} rms(active) {db(bus[k][act] * BUS_GAIN[k]):6.1f} dB   true peak {true_peak_db(bus[k] * BUS_GAIN[k]):+5.1f} dBTP')
+            pk = np.abs(bus[k] * BUS_GAIN[k]).max()          # sample peak: cheap; the true peak is measured on the mix
+            print(f'  {k:6s} rms(active) {db(bus[k][act] * BUS_GAIN[k]):6.1f} dB   sample peak {20 * np.log10(pk):+5.1f} dBFS')
     ok = len(placed) - len(masked) - len(unassessed)
     print(f'  masking: {ok}/{len(placed)} events clear the rest of the mix in at least one band')
     for label, t, smr, band in masked:

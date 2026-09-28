@@ -112,17 +112,45 @@ def compress(x, thr=.25, ratio=3.5, att=.004, rel=.08):
 _METER_FIR = firwin(129, 1 / 4, window=('kaiser', 9))
 
 
-def true_peak(x):
+_FINE_FIR = firwin(161, 1 / 8, window=('kaiser', 5.0))   # scipy's own resample_poly(x, 8, 1) filter, made explicit
+# Upper bound on the envelope from sample peaks alone: no interpolated value can exceed the largest nearby |x| times
+# the worst polyphase branch's sum of |taps| (about 2.35). Blocks whose bound stays under the level that matters are
+# skipped, which on a typical mix leaves only the loud ~10-20% of it to oversample.
+_TP_GAIN = max(max(np.abs(h[j::up] * up).sum() for j in range(up)) for h, up in ((_FINE_FIR, 8), (_METER_FIR, 4)))
+_TP_BLOCK, _TP_PAD = 4800, 64          # 100 ms blocks; 64 samples of context > either filter's half-length (10, 16)
+
+
+def _tp_exact(x2):
+    n = len(x2)
+    fine = np.abs(resample_poly(x2, 8, 1, axis=0, window=_FINE_FIR)).reshape(n, 8, -1).max(axis=(1, 2))
+    meter = np.abs(resample_poly(x2, 4, 1, axis=0, window=_METER_FIR)).reshape(n, 4, -1).max(axis=(1, 2))
+    return np.maximum(np.maximum(fine, meter), np.abs(x2).max(axis=1))
+
+
+def true_peak(x, floor=None):
     """Per-sample true-peak envelope of mono (N,) or stereo (N, 2) audio, max across channels: the peak between each
     sample and the next, as a DAC or an AAC/MP3 decoder reconstructs it. Sample peaks miss these inter-sample overs
     (a built-in gunshot reads -1.9 dBFS by samples but +2.2 dBTP). Oversampled two ways and the larger taken:
     8x with a long filter (close to the ideal waveform; a 4x grid can miss a peak by ~0.2 dB) and 4x with a short
-    meter-style filter (BS.1770 is 4x; see _METER_FIR)."""
-    x2 = np.asarray(x, dtype=float).reshape(len(x), -1); n = len(x2)
-    if not n: return np.zeros(0)
-    fine = np.abs(resample_poly(x2, 8, 1, axis=0)).reshape(n, 8, -1).max(axis=(1, 2))
-    meter = np.abs(resample_poly(x2, 4, 1, axis=0, window=_METER_FIR)).reshape(n, 4, -1).max(axis=(1, 2))
-    return np.maximum(np.maximum(fine, meter), np.abs(x2).max(axis=1))
+    meter-style filter (BS.1770 is 4x; see _METER_FIR).
+    Exact wherever the true peak could exceed `floor` (default: the largest sample peak, which makes the maximum
+    exact); elsewhere it holds the sample peak, and the true peak there is provably <= floor too."""
+    x2 = np.asarray(x, dtype=float)
+    if not x2.size: return np.zeros(len(x2))
+    x2 = x2.reshape(len(x2), -1); n = len(x2); pk = np.abs(x2).max(axis=1)
+    floor = pk.max() if floor is None else floor
+    nb = -(-n // _TP_BLOCK); env = pk.copy()
+    near = np.pad(maximum_filter1d(pk, 2 * _TP_PAD + 1), (0, nb * _TP_BLOCK - n))   # largest |x| within reach
+    need = np.r_[near.reshape(nb, _TP_BLOCK).max(axis=1) * _TP_GAIN > floor, False]
+    k = 0
+    while k < nb:                                                     # oversample runs of blocks that need it
+        if not need[k]: k += 1; continue
+        j = k
+        while need[j]: j += 1
+        s, e = k * _TP_BLOCK, min(n, j * _TP_BLOCK); a, b = max(0, s - _TP_PAD), min(n, e + _TP_PAD)
+        env[s:e] = _tp_exact(x2[a:b])[s - a:s - a + e - s]
+        k = j
+    return env
 
 
 def true_peak_db(x):
@@ -131,24 +159,32 @@ def true_peak_db(x):
     return 20 * np.log10(m) if m > 0 else -np.inf
 
 
-def _limit_pass(x, c, n):
-    pk = true_peak(x)
+def _limit_pass(x, c, n, pk):
+    """One limiting pass from the true-peak envelope pk (exact wherever it can exceed c; the gain ignores the rest)."""
     g_raw = np.minimum(1, c / np.maximum(maximum_filter1d(pk, 2 * n + 1), 1e-12))   # look-ahead: dip before the peak
     g = uniform_filter1d(g_raw, n)                                                   # smoothing: no zipper noise
     g[minimum_filter1d(g_raw, n) >= 1] = 1.0     # exact unity wherever nothing nearby is over: untouched, bit for bit
     return x * (g[:, None] if x.ndim == 2 else g)
 
 
-def limit(x, ceil=-1.0, look=.005):
+def limit(x, ceil=-1.0, look=.005, report=False):
     """Look-ahead true-peak limiter; `ceil` is in dBTP. Accepts mono (N,) or stereo (N, 2); stereo channels are linked.
     Audio whose true peak is already under the ceiling comes back unchanged (same samples, not just close). Smoothing
     can leave a hair of overshoot, so the result is re-measured: a second pass, then (if still over) a tiny static
-    trim, guarantee the returned audio honours the ceiling. Deterministic: same input, same output."""
-    c = 10 ** (ceil / 20); n = max(1, n_(look))
-    y = _limit_pass(np.asarray(x, dtype=float), c, n)
-    if true_peak(y).max(initial=0) > c: y = _limit_pass(y, c, n)
-    tp = true_peak(y).max(initial=0)
-    return y * (c / tp) if tp > c else y
+    trim, guarantee the returned audio honours the ceiling. Deterministic: same input, same output.
+    report=True returns (audio, true peak in dBTP before, after), reusing its own measurements (oversampling a long
+    mix is the expensive part, so callers should not measure it again)."""
+    if ceil > 0: fail(f'limit(): ceil is a true-peak ceiling in dBTP (<= 0), got {ceil}',
+                      'convert a linear ceiling with 20*log10(linear), e.g. 0.95 -> -0.45; -1 is the usual choice')
+    x = np.asarray(x, dtype=float); c = 10 ** (ceil / 20); n = max(1, n_(look))
+    db_ = lambda v: 20 * np.log10(v) if v > 0 else -np.inf
+    pk = true_peak(x, min(c, np.abs(x).max(initial=0)))              # exact max, and exact wherever it exceeds c
+    tp_in = pk.max(initial=0); y, tp = x, tp_in
+    if tp_in > c:
+        y = _limit_pass(x, c, n, pk); pk = true_peak(y, c); tp = pk.max(initial=0)
+        if tp > c: y = _limit_pass(y, c, n, pk); tp = true_peak(y, c).max(initial=0)
+        if tp > c: y = y * (c / tp); tp = c
+    return (y, db_(tp_in), db_(tp)) if report else y
 
 
 # ---------- placing sounds ----------

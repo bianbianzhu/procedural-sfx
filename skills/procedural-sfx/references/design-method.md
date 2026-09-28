@@ -65,22 +65,29 @@ Build and check one layer at a time: return just the attack, render it, then add
 
 ## 4. Rough metric targets
 
-These are heuristics for catching mistakes, not rules. Compare `analyze.py --bands` output against them (the built-in recipes fall inside these ranges). The last column uses the band names `--bands` prints: sub < 60 Hz, low 60–250, lowmid 250–1k, mid 1–4k, high 4–10k, air > 10k.
+These are heuristics for catching mistakes, not rules. Compare `analyze.py --bands` output against them. Every built-in recipe rendered at its defaults (`render_sfx.py --all DIR`) falls inside its row; the last column names them. The band names are the ones `--bands` prints: sub < 60 Hz, low 60–250, lowmid 250–1k, mid 1–4k, high 4–10k, air > 10k.
 
-| Sound | attack | t-20 | centroid | Energy mostly in |
-| --- | --- | --- | --- | --- |
-| UI click / tick | < 2 ms | 10–60 ms | 1.5–5 kHz | mid, high |
-| Footstep (hard) | < 2 ms | 10–60 ms | 2–6 kHz | mid, high |
-| Soft impact / thump | 2–10 ms | 100–300 ms | 50–200 Hz | sub, low |
-| Gunshot | < 3 ms | 100–400 ms | 800–3000 Hz | low, lowmid, mid |
-| Explosion | 5–30 ms | 0.8–2 s | 40–300 Hz | sub, low |
-| Whoosh | 80–250 ms (it swells) | ≈ a third of its length | 1–4 kHz | mid, high |
-| Bell / ding | < 2 ms | > 800 ms | 1–3 kHz | mid |
-| Rumble bed | slow | continuous | < 100 Hz | sub, low |
+Centroid and bands come from one unwindowed FFT of the whole file, so they weigh energy, not what the ear notices first: a gunshot's 1–2 ms crack is a few % of its energy next to the boom, yet it is what makes it a gunshot. Read the small bands as well as the big one.
+
+| Sound | attack | t-20 | centroid | Energy mostly in | Built-ins |
+| --- | --- | --- | --- | --- | --- |
+| UI click, small hard object | < 2 ms | 10–60 ms | 2.5–6 kHz | mid (> 40%) | `click`, `clack` |
+| Footstep, hard floor | < 2 ms | 10–60 ms | 8–14 kHz | air, mid, high | `step` (hard) |
+| Footstep, wood or soft floor | < 15 ms | 30–100 ms | 300–900 Hz | low or lowmid | `step` (wood, soft) |
+| Soft heavy impact / thump | 2–10 ms | 100–300 ms | 40–200 Hz | sub, low | `thump`, `heartbeat` |
+| Gunshot | < 3 ms (a burst: to its loudest shot) | 100–500 ms | 150–600 Hz | low or sub > 85% (boom); the crack shows as 1–5% in mid + high + air | `gunshot` (all kinds), `burst` |
+| Explosion, ignition | 5–60 ms | 0.8–2 s | 40–300 Hz | sub > 85% | `explosion`, `ignite` |
+| Pile collapsing | to its loudest piece | 50–700 ms | 3–6 kHz | mid, lowmid, air | `crash` |
+| Whoosh | 80–250 ms (it swells) | ≈ a third of its length | 1–4 kHz | mid, high | `whoosh` |
+| Bell / ding | < 2 ms | > 800 ms | 1–3 kHz | mid | `ding` |
+| UI sweep, sci-fi zap | < 2 ms | 30–150 ms | 0.5–3 kHz | lowmid or mid | `pop`, `laser` |
+| Steady tone | ~10 ms (5 ms fade) | `>end` (normal for a tone) | its frequency | the band holding it | `beep` |
+| Creak / friction | 50–150 ms (its loudest stutter) | 20–80 ms | 0.5–1.5 kHz | lowmid, mid | `creak` |
+| Rumble, engine or fire bed | slow (0.5–2.5 s) | continuous (`>end` or > 1 s) | < 150 Hz | sub, low | `rumble`, `roar` |
 
 Red flags:
 - **t-20 shows `>end`** on a one-shot sound: it is still loud when the array stops. `add()` fades the last 5 ms so it won't click, but it will stop abruptly. Make the array longer or the tail's tau shorter. (`>end` on t-40 alone is normal for short sounds.)
-- **Centroid far outside the row**: a layer is too loud (e.g. a "gunshot" at 300 Hz is all boom and no crack).
+- **Centroid or band balance far outside the row**: a layer is too loud or missing (e.g. a "gunshot" with under 1% in mid + high + air has lost its crack).
 - **Peak much higher than RMS (> 25 dB)** on a sustained sound: it is spiky. Smooth the envelope or lower the transient.
 
 ## 5. Worked example: a heavy door slam

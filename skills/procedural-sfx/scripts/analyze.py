@@ -10,6 +10,7 @@ Metrics
   t-20/-40 peak -> envelope 20/40 dB down (ms): how long it rings; ">end" = still ringing when the file stops
   (attack on a multi-hit sound such as a burst measures to the loudest hit, not the first)
   centroid spectral centre of mass (Hz): <500 dark/boomy, 500-2000 warm/mid, >3000 bright/crisp
+           (energy-weighted over the whole file, attack included: no analysis window)
 """
 import argparse, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -39,7 +40,11 @@ def describe(x):
         return (after[0] * HOP / SR * 1000) if len(after) else float('nan')
 
     act = x[np.abs(x) > peak * .01] if peak > 0 else x
-    spec = np.abs(np.fft.rfft(x * np.hanning(len(x)))) ** 2; fq = np.fft.rfftfreq(len(x), 1 / SR)
+    # Rectangular, zero-padded FFT over the whole file. A Hann window here would weight the middle of the file and all
+    # but ignore t=0, where a one-shot's attack lives, reading clicks and gunshots too dark. Only band energies and the
+    # centroid are needed, so the leakage a window would prevent does not matter.
+    nfft = 1 << (len(x) - 1).bit_length()
+    spec = np.abs(np.fft.rfft(x, nfft)) ** 2; fq = np.fft.rfftfreq(nfft, 1 / SR)
     tot = spec.sum() + 1e-20
     return dict(dur=len(x) / SR, peak=pk_db, rms=20 * np.log10(np.sqrt(np.mean(act ** 2)) + 1e-12),
                 attack=(peak_i - start) / SR * 1000, t20=fall(20), t40=fall(40),

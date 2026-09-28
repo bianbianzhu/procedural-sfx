@@ -9,7 +9,9 @@
 
 --variants N (N >= 2) also prints analyze.py metrics per take and their spread, with a verdict:
   CHECK: takes are identical   every take is the same sample for sample: the recipe draws no randomness
-  note: takes barely differ    RMS range < 1 dB and centroid range < 2% (only fine noise detail changes)
+  note: takes barely differ    RMS range < 1 dB and centroid range < 2% (only fine noise detail changes), or the most
+                               alike pair has waveform similarity > 0.98 (peak normalised cross-correlation within
+                               +-5 ms: the same waveform up to level, which the spreads cannot see)
   takes vary                   anything more
 """
 import argparse, ast, os, sys
@@ -19,6 +21,7 @@ import recipes
 from analyze import describe
 
 SMALL_RMS_DB, SMALL_CENTROID_PCT = 1.0, 2.0   # below both = "barely differ" (built-in thump, heartbeat, creak)
+SIMILAR = .98                                  # waveform similarity above this = "barely differ", whatever the spreads
 
 
 def parse_kv(items):
@@ -31,6 +34,14 @@ def parse_kv(items):
     return out
 
 
+def similarity(a, b, lag=.005):
+    """Peak normalised cross-correlation of two takes within +-5 ms: 1.0 = same waveform up to level and a small
+    shift (which RMS and centroid spreads cannot see), ~0 = unrelated noise."""
+    n = len(a) + len(b); F = 1 << (n - 1).bit_length()
+    x = np.fft.irfft(np.fft.rfft(a, F) * np.conj(np.fft.rfft(b, F)), F); L = n_(lag)
+    return float(np.abs(np.concatenate([x[:L + 1], x[-L:]])).max() / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-20))
+
+
 def variant_report(takes, scale):
     """Metrics per take (as written, i.e. times the file's normalising gain) and a verdict on how much they differ."""
     ms = lambda v: '>end' if np.isnan(v) else f'{v:.0f}ms'
@@ -39,12 +50,14 @@ def variant_report(takes, scale):
         print(f'  take {i + 1}  peak {m["peak"]:5.1f}  rms {m["rms"]:5.1f}  centroid {m["centroid"]:6.0f}Hz  t-20 {ms(m["t20"])}')
     r = [m['rms'] for m in d]; c = [m['centroid'] for m in d]
     rms_db, cen_pct = max(r) - min(r), 100 * (max(c) - min(c)) / max(np.mean(c), 1e-9)
-    print(f'  spread: rms {rms_db:.2f} dB, centroid {cen_pct:.1f}%')
+    sim = max(similarity(takes[i], takes[j]) for i in range(len(takes)) for j in range(i + 1, len(takes)))
+    print(f'  spread: rms {rms_db:.2f} dB, centroid {cen_pct:.1f}%, waveform similarity {sim:.3f} (most alike pair)')
     if all(len(t) == len(takes[0]) and np.array_equal(t, takes[0]) for t in takes[1:]):
         print('  CHECK: takes are identical — draw randomness from noise()/rand()/uniform() '
               '(fine for a UI tone meant to repeat exactly)')
-    elif rms_db < SMALL_RMS_DB and cen_pct < SMALL_CENTROID_PCT:
-        print(f'  note: takes barely differ (rms < {SMALL_RMS_DB:g} dB, centroid < {SMALL_CENTROID_PCT:g}%); if it repeats close '
+    elif (rms_db < SMALL_RMS_DB and cen_pct < SMALL_CENTROID_PCT) or sim > SIMILAR:
+        why = f'waveform similarity {sim:.3f} > {SIMILAR:g}' if sim > SIMILAR else f'rms < {SMALL_RMS_DB:g} dB, centroid < {SMALL_CENTROID_PCT:g}%'
+        print(f'  note: takes barely differ ({why}); if it repeats close '
               'together, randomise pitch ±5-10% with uniform() in the recipe or vary args and gain per event')
     else:
         print('  takes vary')

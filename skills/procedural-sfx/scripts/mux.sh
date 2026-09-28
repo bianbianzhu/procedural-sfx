@@ -32,7 +32,7 @@ done
 [ -d "$(dirname "$O")" ] || err "output folder does not exist: $(dirname "$O")" "create it first"
 case "$(basename "$O")" in
   ?*.[mM][pP]4|?*.[mM]4[vV]|?*.[mM][oO][vV]|?*.[mM][kK][vV]) ;;
-  *) err "output must be .mp4, .m4v, .mov or .mkv (AAC audio does not go in other containers such as .webm): $O" "name it e.g. final.mp4";;
+  *) err "output must be .mp4, .m4v, .mov or .mkv (the containers this script supports): $O" "name it e.g. final.mp4";;
 esac
 { [ "$V" -ef "$O" ] || [ "$A" -ef "$O" ]; } && err "output is one of the inputs (same file, maybe via a symlink or hard link): $O" \
   "write to a new file, e.g. final.mp4"

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Procedural SFX"
+  short_description: "Synthesize and mix sound effects from code"

@@ -28,7 +28,8 @@ skills/procedural-sfx/
 ├── SKILL.md        entry point: when to use, workflow, script index
 ├── scripts/        runnable tools (synthesis library, recipes, render, analyze, mix, mux)
 ├── references/     loaded on demand: sound design, recipe catalog, sync, mixing, troubleshooting
-└── assets/         example events file and a custom-recipe template
+├── assets/         example events file and a custom-recipe template
+└── agents/         openai.yaml: display name and short description for Codex's skill UI
 ```
 
 ## License

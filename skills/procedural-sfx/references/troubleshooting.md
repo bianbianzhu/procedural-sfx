@@ -38,6 +38,7 @@ The scripts exit 1 on input problems and print `error: <what and where>` followe
 | `error: X produced NaN/inf` | Division by zero or `log(0)` in a recipe | Render it alone with `render_sfx.py` and fix the maths |
 | Recipe from a custom file not found | Function name starts with `_`, or is imported rather than defined there | Define it in that file; only its own public functions are registered |
 | Loudness after delivery is off by ~0.5 LU | `loudnorm` (single- or two-pass) elsewhere in the chain, or normalising twice | Master once with `master.sh` / `mux.sh`; they apply one linear gain measured with `ebur128` |
+| `error: output is the input file` / `output is one of the inputs` | The output path is the input, or a symlink or hard link to it | Write to a new file; the input is never touched |
 | `error: … the loudest target a clean gain change can reach is X LUFS` | The loudest events' true peaks leave too little room to raise the rest | Pass X as the LUFS argument, or lower the gains of the loudest events, remix, master again (`mixing.md` §5) |
 
 ## 3. Final QA checklist
@@ -49,7 +50,7 @@ Run through this before handing over:
 - [ ] Repeated sounds were checked with `render_sfx.py … --variants 4`: the verdict is `takes vary`, or the `CHECK` / `note` was consciously accepted.
 - [ ] `mix.py` report: no `warning`, no `CHECK` lines (or each one consciously accepted), no `limiter working hard`; the written true peak is at or under the ceiling.
 - [ ] `vo` is the loudest sustained bus when there is dialogue; the bed sits 25 dB or more below it.
-- [ ] `master.sh` / `mux.sh` printed a result within ±0.5 LU of the target (or you knowingly accepted the reachable one), with the true peak under the limit.
+- [ ] `master.sh` / `mux.sh` printed a result within ±0.1 LU of the target (or you knowingly accepted the reachable one), with the true peak under the limit.
 - [ ] Stills at three or more event times show the matching visual moment.
 - [ ] Numbers re-measured after the last change (re-run `analyze.py` on changed recipes and `mix.py` on the final events); nothing above is from an older render.
 - [ ] The "not ear-tuned yet" list from the final `mix.py` report is handed to the user as a table (sound · recipe · status · file to audition), each file rendered on its own, with a plain request to listen to every `starting point` and `new` sound.

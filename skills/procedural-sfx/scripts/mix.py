@@ -73,8 +73,9 @@ def validate(E, table, path):
 
 def masking_report(placed, mix, min_smr, span=.3, frame=.03):
     """Signal-to-masker ratio per event: its own energy vs everything else in the mix, per channel and band, in
-    30 ms frames over 0.3 s from its onset, the first 30 ms frame within 6 dB of its own loudest (so a bed that fades
-    in is judged once it is up, not on its first near-silent frames). The best (channel, frame, band) counts: the ear
+    30 ms frames over two 0.3 s windows: from its start, and from its onset, the first 30 ms frame within 6 dB of its
+    own loudest (so a bed that fades in is judged once it is up, and a compound sound whose exposed attack comes well
+    before a louder body is still judged on the attack). The best (channel, frame, band) over both counts: the ear
     catches a sound where it is most exposed. Returns (flagged, unassessed)."""
     bands = [('low', 20, 250), ('mid', 250, 4000), ('high', 4000, 20000)]
     F = n_(frame); fq = np.fft.rfftfreq(F, 1 / SR)
@@ -84,11 +85,12 @@ def masking_report(placed, mix, min_smr, span=.3, frame=.03):
         s = n_(t); e = np.square(own2[:max(0, len(mix) - s)]).sum(1); nf = len(e) // F
         fe = e[:nf * F].reshape(nf, F).sum(1) if nf else e[:1]
         o = int(np.argmax(fe >= fe.max() * .25)) * F if nf and fe.max() > 0 else 0
-        k = min(len(own2), o + n_(span), len(mix) - s)
-        if k <= o: unassessed.append((label, t)); continue
+        L = min(len(own2), len(mix) - s)
+        if L <= 0: unassessed.append((label, t)); continue
+        starts = sorted({i for w0 in {0, o} for i in range(w0, max(w0 + 1, min(L, w0 + n_(span)) - F + 1), F // 2) if i < L})
         best = (-999.0, '')
-        for i in range(o, max(o + 1, k - F + 1), F // 2):
-            j = min(i + F, k); w = np.hanning(j - i)
+        for i in starts:
+            j = min(i + F, L); w = np.hanning(j - i)
             for c in (0, 1):
                 own = own2[i:j, c]; rest = mix[s + i:s + j, c] - own
                 O = np.abs(np.fft.rfft(own * w, F)) ** 2; R = np.abs(np.fft.rfft(rest * w, F)) ** 2
@@ -110,15 +112,32 @@ def place(buf, x, t, gain=1.0, pan=0.0):
     return s, x2
 
 
-def audition(unheard, table, d):
-    """Render each unheard (recipe, args) alone, with the seed of its first placement in the mix, into d."""
-    os.makedirs(d, exist_ok=True); out, used = {}, {}
-    for key, r in unheard.items():
+def plan_audition(unheard, d, protected):
+    """One file per unheard (recipe, args): <recipe>.wav, then <recipe>--2.wav ... ('-' cannot occur in a recipe name,
+    so no generated name can equal another recipe's). Refuses, before anything is written, a name that is the mix, a
+    stem or an input (compared by real path and, for existing files, by device and inode, so links count)."""
+    out, used = {}, {}
+    for key in unheard:
         n = used[key[0]] = used.get(key[0], 0) + 1
-        path = os.path.join(d, f'{key[0]}.wav' if n == 1 else f'{key[0]}_{n}.wav')
-        reseed(r['seed']); write_wav(path, recipes.call(table, key[0], r['args'], f'--audition {key[0]}'), peak=.8)
-        out[key] = path
+        out[key] = os.path.join(d, f'{key[0]}.wav' if n == 1 else f'{key[0]}--{n}.wav')
+    ids = lambda p: {os.path.realpath(p)} | ({(os.stat(p).st_dev, os.stat(p).st_ino)} if os.path.exists(p) else set())
+    guard = set().union(*(ids(p) for p in protected))
+    clash = [p for p in out.values() if ids(p) & guard]
+    if clash: fail(f'--audition {d} would overwrite the mix, a stem or an input: {", ".join(clash)}',
+                   'give --audition its own folder, e.g. --audition audition/')
     return out
+
+
+def audition(unheard, table, paths):
+    """Render each unheard (recipe, args) alone, with the seed of its first placement in the mix."""
+    for key, r in unheard.items():
+        os.makedirs(os.path.dirname(paths[key]) or '.', exist_ok=True)
+        reseed(r['seed']); write_wav(paths[key], recipes.call(table, key[0], r['args'], f'--audition {key[0]}'), peak=.8)
+
+
+def cell(v):
+    """A value made safe for one Markdown table cell: no line breaks, pipes escaped."""
+    return ' '.join(str(v).split()).replace('|', '\\|')
 
 
 def main():
@@ -199,6 +218,11 @@ def main():
     mix = sum(bus[k] * BUS_GAIN[k] for k in BUSES)
     if not np.isfinite(mix).all(): fail('mix contains NaN/inf', 'render each recipe alone with render_sfx.py to find the bad one')
     masked, unassessed = masking_report(placed, mix, a.min_smr)
+    if a.audition:                                 # settle every output path before anything is written
+        protected = [a.out, a.events] + [os.path.join(a.stems, f'{k}.wav') for k in BUSES if a.stems] \
+            + ([a.music if os.path.isabs(a.music) else os.path.join(base, a.music)] if a.music else []) \
+            + [os.path.join(base, e['file']) for e in events if e.get('type') == 'file']
+        apaths = plan_audition(unheard, a.audition, protected)
     mix, tp_in, tp_out = limit(mix, a.ceiling, report=True)
     write_wav(a.out, mix)
     if a.stems:
@@ -223,15 +247,19 @@ def main():
           # > 6 dB of peak reduction (the old "peak above 2x the ceiling" rule) audibly flattens hits and can pump
           + ('   limiter working hard: lower gains' if took > 6 else ''))
     if unheard:
-        files = audition(unheard, table, a.audition) if a.audition else {}
+        if a.audition: audition(unheard, table, apaths)
+        files = apaths if a.audition else {}
+        # the table starts at column 0 after a blank line, so it pastes into Markdown as a table, not a code block
         print('  not ear-tuned yet (ask the user to listen)' + ('' if a.audition else
-              '; add --audition DIR to render each one and fill in the file column') + ':')
-        print('    | sound | recipe | args | status | at | file to audition |\n    | --- | --- | --- | --- | --- | --- |')
+              '; add --audition DIR to render each one and fill in the file column') + ':\n')
+        print('| sound | recipe | args | status | at | file to audition |\n| --- | --- | --- | --- | --- | --- |')
         for key, r in unheard.items():
             doc = re.split(r'[:.](\s|$)', ((table[key[0]].__doc__ or '').strip().splitlines() or [''])[0])[0]
-            at = ', '.join(r['at'][:4]) + (f' (+{len(r["at"]) - 4} more)' if len(r['at']) > 4 else '')
+            times = sorted(r['at'], key=lambda x: float(x.split('s')[0]))
+            at = ', '.join(times[:4]) + (f' (+{len(times) - 4} more)' if len(times) > 4 else '')
             args = ', '.join(f'{k}={v}' for k, v in r['args'].items()) or '—'
-            print(f'    | {r["name"] or doc} | {key[0]} | {args} | {r["status"]} | {at} | {files.get(key, "—")} |')
+            print('| ' + ' | '.join(cell(v) for v in (r['name'] or doc, key[0], args, r['status'], at, files.get(key, '—'))) + ' |')
+        print()
     elif tuned:
         print('  every placed recipe is ear-tuned')
 

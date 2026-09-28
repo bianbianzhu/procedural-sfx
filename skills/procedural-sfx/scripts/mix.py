@@ -114,8 +114,9 @@ def place(buf, x, t, gain=1.0, pan=0.0):
 
 def plan_audition(unheard, d, protected):
     """One file per unheard (recipe, args): <recipe>.wav, then <recipe>--2.wav ... ('-' cannot occur in a recipe name,
-    so no generated name can equal another recipe's). Refuses, before anything is written, a name that is the mix, a
-    stem or an input (compared by real path and, for existing files, by device and inode, so links count)."""
+    so no generated name can equal another recipe's). Refuses, before any audition file is written, a name that is the
+    mix, a stem or an input (compared by real path and, for existing files, by device and inode, so links and case
+    variants count; it runs after the mix and stems are written, so they exist)."""
     out, used = {}, {}
     for key in unheard:
         n = used[key[0]] = used.get(key[0], 0) + 1
@@ -218,16 +219,16 @@ def main():
     mix = sum(bus[k] * BUS_GAIN[k] for k in BUSES)
     if not np.isfinite(mix).all(): fail('mix contains NaN/inf', 'render each recipe alone with render_sfx.py to find the bad one')
     masked, unassessed = masking_report(placed, mix, a.min_smr)
-    if a.audition:                                 # settle every output path before anything is written
-        protected = [a.out, a.events] + [os.path.join(a.stems, f'{k}.wav') for k in BUSES if a.stems] \
-            + ([a.music if os.path.isabs(a.music) else os.path.join(base, a.music)] if a.music else []) \
-            + [os.path.join(base, e['file']) for e in events if e.get('type') == 'file']
-        apaths = plan_audition(unheard, a.audition, protected)
     mix, tp_in, tp_out = limit(mix, a.ceiling, report=True)
     write_wav(a.out, mix)
     if a.stems:
         for k in BUSES:
             if bus[k].any(): write_wav(os.path.join(a.stems, f'{k}.wav'), bus[k] * BUS_GAIN[k])
+    if a.audition:                                 # settle the audition paths now that the mix and stems exist
+        protected = [a.out, a.events] + [os.path.join(a.stems, f'{k}.wav') for k in BUSES if a.stems] \
+            + ([a.music if os.path.isabs(a.music) else os.path.join(base, a.music)] if a.music else []) \
+            + [os.path.join(base, e['file']) for e in events if e.get('type') == 'file']
+        apaths = plan_audition(unheard, a.audition, protected)
 
     print(f'{a.out}  {dur:.2f}s  {len(placed)} of {len(events)} events placed')
     for k in BUSES:

@@ -33,6 +33,8 @@ The scripts exit 1 on input problems and print `error: <what and where>` followe
 | `error: … no recipe named 'X'` | Type typo, or `--recipes` missing | Follow the "did you mean" hint; `render_sfx.py --recipes file.py --list` shows what is registered |
 | `error: X (…): unknown argument(s)` | An `args` key the recipe doesn't take | The message lists the accepted arguments and their defaults |
 | Mix is slow | `compress()` is a per-sample Python loop | Use it on voice files only, once, and cache the result |
+| `error: --ceiling is a true-peak ceiling in dBTP` | An old linear value such as `--ceiling 0.95` | Pass dBTP: `-1` (default) or `-2` for US broadcast |
+| Sample peak looks safe but the file clips after encoding | Inter-sample (true) peaks: saturated noise bursts overshoot between samples | Trust the report's `true peak … dBTP`, not the sample peak; `mix.py` limits true peak |
 | `error: X produced NaN/inf` | Division by zero or `log(0)` in a recipe | Render it alone with `render_sfx.py` and fix the maths |
 | Recipe from a custom file not found | Function name starts with `_`, or is imported rather than defined there | Define it in that file; only its own public functions are registered |
 | Loudness after mux is off by ~0.5 LU | Single-pass loudnorm elsewhere in the chain | Use `mux.sh` (two-pass) and don't normalise twice |
@@ -44,7 +46,7 @@ Run through this before handing over:
 - [ ] `check_env.py` passes; every recipe used renders alone without error.
 - [ ] Each new or changed recipe has been through `analyze.py --bands` and sits near its row in `design-method.md` §4.
 - [ ] Repeated sounds were auditioned with `render_sfx.py … --variants 4` and vary.
-- [ ] `mix.py` report: no `warning`, no `CHECK` lines (or each one consciously accepted), pre-limit peak < 2 × ceiling.
+- [ ] `mix.py` report: no `warning`, no `CHECK` lines (or each one consciously accepted), no `limiter working hard`; the written true peak is at or under the ceiling.
 - [ ] `vo` is the loudest sustained bus when there is dialogue; the bed sits 25 dB or more below it.
 - [ ] `mux.sh` result is within ±1 LU of the target, and the true peak is under the limit.
 - [ ] Stills at three or more event times show the matching visual moment.

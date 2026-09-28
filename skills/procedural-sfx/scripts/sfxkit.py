@@ -4,15 +4,16 @@ Every generator returns a mono float64 array at SR. Stereo buffers are shaped (N
 Import from any script:  sys.path.insert(0, "<skill>/scripts"); from sfxkit import *
 """
 import numpy as np
-from scipy.signal import butter, sosfilt, resample_poly
-from scipy.ndimage import maximum_filter1d, uniform_filter1d
+from scipy.signal import butter, sosfilt, resample_poly, firwin
+from scipy.ndimage import maximum_filter1d, minimum_filter1d, uniform_filter1d
 
 SR = 48000
+
 _rng = np.random.default_rng(7)
 
 __all__ = ['SR', 'np', 'reseed', 'rand', 'uniform', 't_', 'n_', 'noise', 'brown', 'env_exp', 'env_ad',
            'bp', 'lp', 'hp', 'sweep', 'norm', 'sat', 'echo', 'radio_fx', 'compress', 'limit',
-           'add', 'db', 'read_wav', 'write_wav', 'fail']
+           'true_peak', 'true_peak_db', 'add', 'db', 'read_wav', 'write_wav', 'fail']
 
 
 def fail(msg, fix=None, code=1):
@@ -105,12 +106,48 @@ def compress(x, thr=.25, ratio=3.5, att=.004, rel=.08):
     return x * g
 
 
-def limit(x, ceil=.95, look=.005):
-    """Look-ahead peak limiter. Accepts mono (N,) or stereo (N, 2); stereo channels are linked."""
-    n = n_(look)
-    pk = np.abs(x).max(axis=1) if x.ndim == 2 else np.abs(x)
-    g = uniform_filter1d(np.minimum(1, ceil / np.maximum(maximum_filter1d(pk, 2 * n + 1), 1e-9)), n)
+# Loudness meters interpolate with short filters that over-read sharp HF transients (a saturated gunshot crack) by up
+# to ~0.2 dB versus the ideal reconstruction. This 4x, 16-taps-per-phase Kaiser FIR reproduces ffmpeg's ebur128
+# true-peak readings to within 0.05 dB (mostly 0.01) on the built-in recipes, so a file limited here passes that meter.
+_METER_FIR = firwin(129, 1 / 4, window=('kaiser', 9))
+
+
+def true_peak(x):
+    """Per-sample true-peak envelope of mono (N,) or stereo (N, 2) audio, max across channels: the peak between each
+    sample and the next, as a DAC or an AAC/MP3 decoder reconstructs it. Sample peaks miss these inter-sample overs
+    (a built-in gunshot reads -1.9 dBFS by samples but +2.2 dBTP). Oversampled two ways and the larger taken:
+    8x with a long filter (close to the ideal waveform; a 4x grid can miss a peak by ~0.2 dB) and 4x with a short
+    meter-style filter (BS.1770 is 4x; see _METER_FIR)."""
+    x2 = np.asarray(x, dtype=float).reshape(len(x), -1); n = len(x2)
+    if not n: return np.zeros(0)
+    fine = np.abs(resample_poly(x2, 8, 1, axis=0)).reshape(n, 8, -1).max(axis=(1, 2))
+    meter = np.abs(resample_poly(x2, 4, 1, axis=0, window=_METER_FIR)).reshape(n, 4, -1).max(axis=(1, 2))
+    return np.maximum(np.maximum(fine, meter), np.abs(x2).max(axis=1))
+
+
+def true_peak_db(x):
+    """True peak in dBTP (0 dBTP = full scale). Use this wherever a peak is reported against a delivery limit."""
+    return 20 * np.log10(true_peak(x).max(initial=0) + 1e-12)
+
+
+def _limit_pass(x, c, n):
+    pk = true_peak(x)
+    g_raw = np.minimum(1, c / np.maximum(maximum_filter1d(pk, 2 * n + 1), 1e-12))   # look-ahead: dip before the peak
+    g = uniform_filter1d(g_raw, n)                                                   # smoothing: no zipper noise
+    g[minimum_filter1d(g_raw, n) >= 1] = 1.0     # exact unity wherever nothing nearby is over: untouched, bit for bit
     return x * (g[:, None] if x.ndim == 2 else g)
+
+
+def limit(x, ceil=-1.0, look=.005):
+    """Look-ahead true-peak limiter; `ceil` is in dBTP. Accepts mono (N,) or stereo (N, 2); stereo channels are linked.
+    Audio whose true peak is already under the ceiling comes back unchanged (same samples, not just close). Smoothing
+    can leave a hair of overshoot, so the result is re-measured: a second pass, then (if still over) a tiny static
+    trim, guarantee the returned audio honours the ceiling. Deterministic: same input, same output."""
+    c = 10 ** (ceil / 20); n = max(1, n_(look))
+    y = _limit_pass(np.asarray(x, dtype=float), c, n)
+    if true_peak(y).max(initial=0) > c: y = _limit_pass(y, c, n)
+    tp = true_peak(y).max(initial=0)
+    return y * (c / tp) if tp > c else y
 
 
 # ---------- placing sounds ----------

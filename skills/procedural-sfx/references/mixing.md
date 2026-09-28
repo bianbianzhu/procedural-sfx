@@ -17,7 +17,9 @@
 | `music` | `--music` file, `bus: music` events | 1.0 | Ducked by `--duck-db` (default 8 dB) under voice, with 0.25 s smoothing |
 | `bed` | `--bed RECIPE`, `bus: bed` events | 1.0 | Room tone, rumble, wind; `--bed-gain` default 0.03 (about −30 dB) |
 
-After summing the buses, `mix.py` checks for NaN, applies a linked stereo look-ahead limiter at `--ceiling` (0.95), writes a 32-bit float wav at 48 kHz, and optionally writes each bus to `--stems DIR` (also float, so a hot bus is not clipped on disk) for inspection or for someone else to remix.
+After summing the buses, `mix.py` checks for NaN, applies a linked stereo look-ahead **true-peak** limiter at `--ceiling` (default −1.0 dBTP, allowed −6 … 0), writes a 32-bit float wav at 48 kHz, and optionally writes each bus to `--stems DIR` (unlimited, also float, so a hot bus is not clipped on disk) for inspection or for someone else to remix.
+
+Why true peak: the waveform a DAC or an AAC/MP3 decoder rebuilds between samples can rise well above the samples themselves. A saturated noise burst is the worst case: the built-in `gunshot` peaks at −1.9 dBFS by samples but +2.2 dBTP, so a mix that looked safe clipped once transcoded. The limiter detects peaks on oversampled copies (`sfxkit.true_peak`: 8x for accuracy, plus a 4x meter-style filter that matches ffmpeg's `ebur128` to within 0.05 dB), re-measures its own output and trims any smoothing overshoot, so the written file honours the ceiling on both. A mix whose true peak is already under the ceiling is written untouched, sample for sample.
 
 ## 2. Gain staging
 
@@ -37,16 +39,15 @@ Put type defaults in a `--gains gains.json` map (`{"step": 0.3, "gunshot": 0.7}`
 
 ```
 mix.wav  14.00s  8 of 8 events placed
-  sfx    rms(active)  -14.1 dB   peak 0.76
-  bed    rms(active)  -44.8 dB   peak 0.03
+  sfx    rms(active)  -14.1 dB   true peak  +2.2 dBTP
   masking: 8/8 events clear the rest of the mix in at least one band
-  pre-limit peak 0.76 -> 0.76
+  true peak +2.2 dBTP -> -1.0 dBTP (ceiling -1.0; limiter took up to 3.2 dB off the loudest transients)
 ```
 
 - **N of M events placed**: events starting after `dur` or ending before 0 are skipped with a warning.
 - **rms(active)** is loudness while the bus is actually sounding. In dialogue-driven pieces, keep `vo` the loudest of `vo`, `music` and the steady parts of `sfx`. Short hero hits may exceed it.
-- **masking** gives, for each event, its best signal-to-masker ratio across both channels and three bands (low/mid/high) in its most exposed 30 ms frame within its first 0.3 s. It is compared against everything else playing at that moment, so panning apart counts. Below `--min-smr` (default 0 dB) gets a `CHECK` line.
-- **pre-limit peak** above about 2 × the ceiling means the limiter is flattening things. Lower gains instead of relying on it.
+- **masking** gives, for each event, its best signal-to-masker ratio across both channels and three bands (low/mid/high) in its most exposed 30 ms frame within its first 0.3 s. It is compared against everything else playing at that moment, so panning apart counts. Below `--min-smr` (default 0 dB) gets a `CHECK` line. Its limits: it only looks at the first 0.3 s (a tail buried later is not checked), and one exposed band in one frame is enough to pass. So no `CHECK` means "probably not lost", not "clearly audible"; a sound that matters to the story still needs a listen.
+- **true peak** before and after the limiter, in dBTP. "Limiter took up to X dB" is how far the loudest transient was pulled down. Above 6 dB the report adds `limiter working hard: lower gains`: that much peak reduction audibly flattens hits and can pump, so lower the gains of the loudest events instead of relying on it. A few dB on the odd gunshot crack is normal.
 
 ## 4. Fixing masking
 

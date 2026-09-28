@@ -11,7 +11,7 @@ Exit status: 0 = mix written; 1 = input problem, explained on stderr as "error: 
 """
 import argparse, json, os, sys, zlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from sfxkit import SR, np, reseed, add, limit, read_wav, write_wav, db, n_, fail
+from sfxkit import SR, np, reseed, add, limit, true_peak_db, read_wav, write_wav, db, n_, fail
 import recipes
 
 BUSES = ('sfx', 'vo', 'music', 'bed')
@@ -114,12 +114,14 @@ def main():
     ap.add_argument('--bed', metavar='RECIPE', help='recipe rendered for the whole duration as a background bed')
     ap.add_argument('--bed-gain', type=float, default=.03)
     ap.add_argument('--duck-db', type=float, default=8.0, help='how far music dips under voice (dB)')
-    ap.add_argument('--ceiling', type=float, default=.95, help='limiter ceiling, 0 < c <= 1')
+    ap.add_argument('--ceiling', type=float, default=-1.0, help='true-peak limiter ceiling in dBTP, -6 .. 0 (default -1)')
     ap.add_argument('--stems', metavar='DIR', help='also write each bus as its own wav')
     ap.add_argument('--min-smr', type=float, default=0.0,
                     help='flag events whose best band is less than this many dB above everything else playing')
     a = ap.parse_args()
-    if not 0 < a.ceiling <= 1: fail(f'--ceiling must be in (0, 1], got {a.ceiling}')
+    if not -6 <= a.ceiling <= 0:
+        fail(f'--ceiling is a true-peak ceiling in dBTP and must be in [-6, 0], got {a.ceiling}',
+             'use -1 (web, streaming, most delivery specs) or -2 (US broadcast); a linear 0.95 is about -0.4 dBTP')
 
     base = os.path.dirname(os.path.abspath(a.events))
     table = recipes.load(a.recipes)
@@ -168,8 +170,9 @@ def main():
     mix = sum(bus[k] * BUS_GAIN[k] for k in BUSES)
     if not np.isfinite(mix).all(): fail('mix contains NaN/inf', 'render each recipe alone with render_sfx.py to find the bad one')
     masked, unassessed = masking_report(placed, mix, a.min_smr)
-    raw_peak = np.abs(mix).max()
+    tp_in = true_peak_db(mix)
     mix = limit(mix, a.ceiling)
+    tp_out = true_peak_db(mix)
     write_wav(a.out, mix)
     if a.stems:
         for k in BUSES:
@@ -179,15 +182,18 @@ def main():
     for k in BUSES:
         if bus[k].any():
             act = np.abs(bus[k]).max(1) > 1e-4
-            print(f'  {k:6s} rms(active) {db(bus[k][act] * BUS_GAIN[k]):6.1f} dB   peak {np.abs(bus[k] * BUS_GAIN[k]).max():.2f}')
+            print(f'  {k:6s} rms(active) {db(bus[k][act] * BUS_GAIN[k]):6.1f} dB   true peak {true_peak_db(bus[k] * BUS_GAIN[k]):+5.1f} dBTP')
     ok = len(placed) - len(masked) - len(unassessed)
     print(f'  masking: {ok}/{len(placed)} events clear the rest of the mix in at least one band')
     for label, t, smr, band in masked:
         print(f'    CHECK {t:7.2f}s {label:14s} best band {band:4s} {smr:+5.1f} dB  -> raise gain, pan apart, or move it off louder sounds')
     for label, t in unassessed:
         print(f'    CHECK {t:7.2f}s {label:14s} not assessed (starts at the very end)')
-    print(f'  pre-limit peak {raw_peak:.2f} -> {np.abs(mix).max():.2f}'
-          + ('   (limiter working hard: lower gains)' if raw_peak > 2 * a.ceiling else ''))
+    took = tp_in - tp_out
+    print(f'  true peak {tp_in:+.1f} dBTP -> {tp_out:+.1f} dBTP (ceiling {a.ceiling:+.1f}; '
+          + (f'limiter took up to {took:.1f} dB off the loudest transients)' if took > .05 else 'limiter idle)')
+          # > 6 dB of peak reduction (the old "peak above 2x the ceiling" rule) audibly flattens hits and can pump
+          + ('   limiter working hard: lower gains' if took > 6 else ''))
 
 
 if __name__ == '__main__':
